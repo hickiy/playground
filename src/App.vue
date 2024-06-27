@@ -2,22 +2,7 @@
 <template>
   <ElFormWrap :model="form" ref="form" label-width="80px" inline>
     <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
-    </el-form-item>
-    <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
-    </el-form-item>
-    <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
-    </el-form-item>
-    <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
-    </el-form-item>
-    <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
-    </el-form-item>
-    <el-form-item label="名字" prop="name">
-      <el-input v-model="form.name" placeholder="请输入名字"></el-input>
+      <el-input placeholder="请输入名字"></el-input>
     </el-form-item>
   </ElFormWrap>
 </template>
