@@ -24,6 +24,7 @@ export default {
     onUpdated(() => {
       console.log("WrapComponent updated");
     });
+    ctx.slots._ = undefined
     return (...args) => ChildComponent.render(...args);
   },
 };
