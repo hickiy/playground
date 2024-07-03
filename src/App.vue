@@ -1,14 +1,9 @@
 <!-- works abnormally -->
 <template>
-  <WrapComponent>
-    <div>from parent component</div>
-  </WrapComponent>
+  <Main> </Main>
 </template>
 <script setup>
-import WrapComponent from "./wrapComponent.jsx";
+import Main from "./default-slot/index.vue";
 </script>
 
 <style scoped lang="scss"></style>
-
-
-
