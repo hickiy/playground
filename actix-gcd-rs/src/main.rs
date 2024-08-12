@@ -1,25 +1,32 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
+#[cfg(target_os = "macos")]
 use std::process::exit;
+
+#[cfg(target_os = "macos")]
 use signal_hook::{consts::signal::SIGHUP, iterator::Signals};
 
 fn main() {
+    #[cfg(target_os = "macos")]
     let mut signals = Signals::new(&[SIGHUP]).expect("Error registering signal handler");
+    #[cfg(target_os = "macos")]
     std::thread::spawn(move || {
         for sig in signals.forever() {
-           match sig {
-            _sighup => {
-                   println!("Received SIGHUP, exiting...");
-                   exit(0);
-               }
-           }
+            match sig {
+                SIGHUP => {
+                    println!("Received SIGHUP, exiting...");
+                    exit(0);
+                }
+                _ => unreachable!(),
+            }
         }
     });
 
-    let server = HttpServer::new(|| 
+    let server = HttpServer::new(|| {
         App::new()
-        .route("/", web::get().to(get_index))
-        .route("/gcd", web::post().to(post_gcd)));
+            .route("/", web::get().to(get_index))
+            .route("/gcd", web::post().to(post_gcd))
+    });
     println!("Serving on http://localhost:3000...");
     server
         .bind("127.0.0.1:3000")
