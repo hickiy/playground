@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Demo</title>
+    <style>
+        video {
+            width: 320px;
+            height: 240px;
+            margin: 10px;
+            background-color: black;
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>WebRTC 本地测试</h1>
+    <video id="localVideo" autoplay playsinline loop></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+    <button id="startButton">开始连接</button>
+    <button id="callButton">呼叫</button>
+    <button id="hangupButton">挂断</button>
+    <script>
+        const startButton = document.getElementById('startButton');
+        const callButton = document.getElementById('callButton');
+        const hangupButton = document.getElementById('hangupButton');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        let localStream;
+        let pc1;
+        let pc2;
+
+        startButton.onclick = start;
+        callButton.onclick = call;
+        hangupButton.onclick = hangup;
+
+        async function start() {
+            const videoFile = './video.mp4'; // 替换为本地 MP4 文件的路径
+            localVideo.src = videoFile;
+            localVideo.play();
+        }
+
+        async function call() {
+            const configuration = {};
+            pc1 = new RTCPeerConnection(configuration);
+            pc2 = new RTCPeerConnection(configuration);
+
+            pc1.onicecandidate = e => {
+                console.log(e.candidate);
+                pc2.addIceCandidate(e.candidate);
+            };
+            pc2.onicecandidate = e => {
+                console.log(e.candidate);
+                pc1.addIceCandidate(e.candidate);
+            }
+
+            pc2.ontrack = e => remoteVideo.srcObject = e.streams[0];
+
+            localStream = localVideo.captureStream(); // 从视频元素捕获流
+            localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
+
+            const offer = await pc1.createOffer();
+            console.log(offer);
+            await pc1.setLocalDescription(offer);
+            await pc2.setRemoteDescription(offer);
+            const answer = await pc2.createAnswer();
+            console.log(answer);
+            await pc2.setLocalDescription(answer);
+            await pc1.setRemoteDescription(answer);
+        }
+
+        function hangup() {
+            pc1.close();
+            pc2.close();
+            pc1 = null;
+            pc2 = null;
+        }
+
+
+    </script>
+</body>
+
+</html>

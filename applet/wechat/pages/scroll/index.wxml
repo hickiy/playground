@@ -1,0 +1,10 @@
+<!--pages/scroll/index.wxml-->
+<view class="container">
+  <view class="head">head</view>
+  <scroll-view class="body" scroll-y refresher-enabled>
+    <view style="height: 200px;">我是滚动内容</view>
+    <view class="sticky">sticky</view>
+    <view class="content">我是滚动内容</view>
+  </scroll-view>
+  <view class="footer">footer</view>
+</view>

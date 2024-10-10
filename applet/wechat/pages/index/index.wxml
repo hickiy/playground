@@ -1,0 +1,13 @@
+<!--index.wxml-->
+<view class="wrap">
+  <view class="title">title</view>
+  <view class="body">
+    <button type="primary" bindtap="bindtap">测试文件选择</button>
+    <!-- 在微信小程序中可直接调用地理位置api获取地理位置信息 -->
+    <button type="primary" bindtap="getGeo">获取地理位置</button>
+    <!-- 在webview中，navigator.geolocation api 默认被禁用 -->
+    <!-- 在webview中使用 window.parent.postMassage api与小程序进行通信，实现地理位置获取 -->
+    <!-- 在webview中接入wx-js-sdk，通过授权校验，可以在h5中直接调用地理位置获取api，实现地理位置获取-->
+    <!-- <web-view src="https://caijinbo.top/web/html5/api/geolocation/index.html" /> -->
+  </view>
+</view>

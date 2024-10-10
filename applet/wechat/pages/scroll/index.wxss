@@ -1,0 +1,22 @@
+/* pages/scroll/index.wxss */
+.container{
+  height: 100vh;
+  display: flex;
+  flex-flow: column nowrap;
+}
+.footer,.head{
+  background-color: red;
+  height: 48px;
+}
+.body{
+  flex: 1;
+  background-color: yellow;
+  overflow: hidden;
+}
+.sticky{
+  position: sticky;
+  top: 0;
+}
+.content{
+  height: 800px;
+}
