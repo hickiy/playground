@@ -1,10 +1,14 @@
 <template>
   <div class="hello">
-    <el-form :model="form" ref="form" label-width="120px">
-      <el-form-item label="测试" prop="value">
-        <el-input v-model="form.value" type="number" :decimal="2"></el-input>
-      </el-form-item>
-    </el-form>
+    <el-input v-model="form.value" type="number" :decimal="2"></el-input>
+    <el-table :data="[]" title="" height="100%" v-loading="loading" border>
+      <el-table-column label="序号" type="index" width="60"></el-table-column>
+      <el-table-column label="" prop="" min-width="120"></el-table-column>
+      <el-table-column label="" prop="" min-width="120"></el-table-column>
+      <el-table-column label="" prop="" min-width="120"></el-table-column>
+      <el-table-column label="" prop="" min-width="120"></el-table-column>
+      <el-table-column label="" prop="" min-width="120"></el-table-column>
+    </el-table>
   </div>
 </template>
 

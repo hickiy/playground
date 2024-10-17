@@ -22,6 +22,7 @@ export default {
     return (...args) => {
       const vnode = render(...args)
       instance.vnode.props['onUpdate:modelValue'] = wrapFn;
+      vnode.props['onMousewheel'] = (e) => e.preventDefault();
       return vnode;
     };
   }
