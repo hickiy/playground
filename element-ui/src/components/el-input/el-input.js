@@ -16,6 +16,7 @@ export default {
   render(h) {
     const vnode = Input.render.call(this, h);
     if (this.type == 'number' && this.decimal != null) {
+      vnode.data.on.mousewheel = (e) => e.preventDefault();
       const inputHandlers = this._events.input ?? [];
       this._events.input = [(value) => {
         const [integer, decimal] = value.split('.');
