@@ -13,6 +13,8 @@
 .DS_Store
 Thumbs.db
 *.dll
+*.exp
+*.lib
 
 # node.js
 node_modules/

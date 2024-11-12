@@ -1,6 +1,7 @@
-// hello.c
 #include <stdio.h>
 
-void hello_from_c() {
-    printf("Hello from C!\n");
+__declspec(dllexport) void hello_from_c() {
+    printf("Hello, World!\n");
 }
+
+// gcc -shared -o hello.dll hello.c
