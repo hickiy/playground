@@ -1,14 +1,14 @@
 <template>
   <div class="hello">
-    <el-input v-model="form.value" type="number" :decimal="2"></el-input>
-    <el-table :data="[]" title="" height="100%" v-loading="loading" border>
-      <el-table-column label="序号" type="index" width="60"></el-table-column>
-      <el-table-column label="" prop="" min-width="120"></el-table-column>
-      <el-table-column label="" prop="" min-width="120"></el-table-column>
-      <el-table-column label="" prop="" min-width="120"></el-table-column>
-      <el-table-column label="" prop="" min-width="120"></el-table-column>
-      <el-table-column label="" prop="" min-width="120"></el-table-column>
-    </el-table>
+    <el-form :model="form">
+      <el-form-item label="test input" prop="value" :rules="{
+        required: true,
+        message: '请输入数字',
+        trigger: 'change',
+      }">
+        <el-input v-model.number="form.value" type="number"></el-input>
+      </el-form-item>
+    </el-form>
   </div>
 </template>
 
@@ -18,10 +18,10 @@ export default {
   data() {
     return {
       form: {
-        value: 0,
+        value: '',
       },
     };
-  },
+  }
 };
 </script>
 

@@ -1,11 +1,10 @@
 import * as ElementPlus from 'element-plus';
-import MyInput from './el-input';
 // import MyUpload from './el-upload';
 // import MyTable from './el-table';
 // import MyTableColumn from './el-table/column';
 // import MyForm from './el-form';
 // 重写ElementPlus的install方法，将自定义的组件也注册到Vue中
-const { ElInput,
+const {
   // ElUpload, ElTable, ElTableColumn, ElForm, 
   ...component } = ElementPlus;
 export default {
@@ -17,7 +16,6 @@ export default {
         app.use(component[key]);
       }
     });
-    app.component('ElInput', MyInput);
     // app.component('ElUpload', MyUpload);
     // app.component('ElTable', MyTable);
     // app.component('ElTableColumn', MyTableColumn);
