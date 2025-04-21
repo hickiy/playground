@@ -1,0 +1,29 @@
+import { ElInput } from 'element-plus';
+
+export default {
+  extends: ElInput,
+  props: {
+    decimal: {
+      type: Number, // 保留小数位数
+      default: 0,
+    }
+  },
+  setup(props, ctx) {
+    let originEmit = ctx.emit;
+    return ElInput.setup(props, {
+      ...ctx,
+      emit: (event, ...args) => {
+        if (event === 'update:modelValue') {
+          const [integer, decimal] = args[0].split('.');
+          if (decimal?.length > props.decimal) {
+            originEmit(event, `${integer}.${decimal.slice(0, props.decimal)}`);
+          } else {
+            originEmit(event, ...args);
+          }
+        } else {
+          originEmit(event, ...args);
+        }
+      }
+    });
+  }
+}

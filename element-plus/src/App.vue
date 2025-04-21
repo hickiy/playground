@@ -6,7 +6,7 @@
         message: '请输入数字',
         trigger: 'change',
       }">
-        <el-input v-model.number="form.value" type="number"></el-input>
+        <el-input v-model="form.value" type="number" :decimal="6"></el-input>
       </el-form-item>
     </el-form>
   </div>
