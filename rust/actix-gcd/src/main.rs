@@ -48,6 +48,7 @@ fn get_index() -> HttpResponse {
     )
 }
 
+// 求最大公约数（全称：Greatest Common Divisor）
 fn gcd(mut n: u64, mut m: u64) -> u64 {
     assert!(n != 0 && m != 0);
     while m != 0 {
