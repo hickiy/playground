@@ -42,7 +42,11 @@
     "disableUseStrict": false,
     "useCompilerPlugins": false,
     "condition": false,
-    "ignoreUploadUnusedFiles": true
+    "ignoreUploadUnusedFiles": true,
+    "compileWorklet": false,
+    "localPlugins": false,
+    "swc": false,
+    "disableSWC": true
   },
   "compileType": "miniprogram",
   "condition": {},
@@ -54,5 +58,7 @@
   "packOptions": {
     "ignore": [],
     "include": []
-  }
+  },
+  "libVersion": "2.24.6",
+  "simulatorPluginLibVersion": {}
 }

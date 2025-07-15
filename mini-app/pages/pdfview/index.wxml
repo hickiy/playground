@@ -1,0 +1,3 @@
+<view class="pdf-container">
+  <web-view src="http://10.10.2.164:5500/static/draf.html" bindmessage="onMessage" />
+</view>

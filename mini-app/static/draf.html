@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8">
+  <title>PDF预览滚动监听</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+  <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+    }
+
+    #pdfContainer {
+      width: 100vw;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .pdf-page {
+      max-width: 750px;
+      width: 100%;
+      margin: 0 auto;
+      display: block;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="pdfContainer"></div>
+  <script>
+    pdfjsLib.getDocument('http://127.0.0.1:5500/static/draf.pdf').promise.then(function (pdf) {
+      const container = document.getElementById('pdfContainer');
+
+      // 监听滚动事件
+      container.addEventListener('scroll', function () {
+        const scrollTop = container.scrollTop;
+        const containerHeight = container.clientHeight;
+        const totalHeight = container.scrollHeight;
+        if (scrollTop + containerHeight >= totalHeight - 2) {
+          if (window.wx && window.wx.miniProgram) {
+            window.wx.miniProgram.postMessage({ data: { type: 'pdfScrollEnd' } });
+          }
+        }
+      });
+
+      // 渲染所有页面
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        pdf.getPage(pageNum).then(function (page) {
+          const canvas = document.createElement('canvas');
+          canvas.className = 'pdf-page';
+          const ctx = canvas.getContext('2d');
+
+          const viewport = page.getViewport({ scale: 1.5 });
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+
+          container.appendChild(canvas);
+
+          page.render({ canvasContext: ctx, viewport: viewport });
+        });
+      }
+    });
+  </script>
+</body>
+
+</html>

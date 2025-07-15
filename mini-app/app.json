@@ -1,7 +1,8 @@
 {
   "pages": [
-    "pages/scroll/index",
+    "pages/pdfview/index",
     "pages/index/index",
+    "pages/scroll/index",
     "pages/logs/logs"
   ],
   "window": {
