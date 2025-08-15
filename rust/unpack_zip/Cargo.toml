@@ -1,0 +1,9 @@
+[package]
+name = "unpack_zip"
+version = "0.1.0"
+edition = "2024"
+default-run = "unpack_zip"
+
+[dependencies]
+flate2 = "1.1.2"
+tar = "0.4.44"
