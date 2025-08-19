@@ -1,4 +1,4 @@
-pub fn find_max(arr: &[i32]) -> Option<i32> {
+fn find_max(arr: &[i32]) -> Option<i32> {
   const THRESHOLD: usize = 2;
 
   if arr.len() <= THRESHOLD {
@@ -18,4 +18,9 @@ pub fn find_max(arr: &[i32]) -> Option<i32> {
      Some(max_l.max(max_r))
 
   }).unwrap()
+}
+pub fn new() {
+    let arr = [1, 25, -4, 10, 100];
+    let max = find_max(&arr).unwrap();
+    println!("The max element is {}", max);
 }
