@@ -1,0 +1,9 @@
+[package]
+name = "parallel_programming"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25.6"
+rand="0.8.5"
+rayon = "1.11.0"
