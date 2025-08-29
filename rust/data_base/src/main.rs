@@ -2,6 +2,6 @@
 mod postgres;
 mod sqlite;
 fn main() {
-    sqlite::new();
-    postgres::new();
+    // sqlite::main();
+    postgres::main();
 }
