@@ -1,0 +1,2 @@
+[alias]
+rr = "run --bin character_set"

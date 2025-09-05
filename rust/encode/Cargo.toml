@@ -1,0 +1,19 @@
+[package]
+name = "encode"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "character_set"
+path = "src/character_set/main.rs"
+
+[[bin]]
+name = "resolve_cvs"
+path = "src/resolve_cvs/main.rs"
+
+[[bin]]
+name = "structuring"
+path = "src/structuring/main.rs"
+
+[dependencies]
+percent-encoding = "2.3.2"
