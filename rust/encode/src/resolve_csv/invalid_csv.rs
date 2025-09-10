@@ -1,0 +1,26 @@
+use serde::Deserialize;
+use std::mem::size_of;
+
+#[derive(Debug, Deserialize)]
+struct Record {
+    name: String,
+    place: String,
+    #[serde(deserialize_with = "csv::invalid_option")]
+    id: Option<String>,
+}
+
+pub fn new() {
+    let data = "name,place,id
+mark,sydney,46.5
+ashley,zurich,92
+akshat,delhi,37
+alisha,colombo,xyz";
+
+    let mut rdr = csv::Reader::from_reader(data.as_bytes());
+    for result in rdr.deserialize() {
+        let record: Record = result.unwrap();
+        println!("{:?}", record);
+    }
+
+    println!("size_of<Record>() = {}", size_of::<Record>());
+}
