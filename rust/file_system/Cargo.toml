@@ -1,0 +1,18 @@
+[package]
+name = "file_system"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "read_and_write"
+path = "src/read_and_write/main.rs"
+
+[[bin]]
+name = "traverse_directory"
+path = "src/traverse_directory/main.rs"
+
+[dependencies]
+glob = "0.3.3"
+memmap = "0.7.0"
+same-file = "1.0.6"
+walkdir = "2.5.0"
