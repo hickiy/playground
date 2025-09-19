@@ -1,0 +1,8 @@
+[package]
+name = "os"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.11.2"
+thiserror = "2.0.16"

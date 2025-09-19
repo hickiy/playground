@@ -1,0 +1,7 @@
+ls: cannot access 'oops': No such file or directory
+.:
+Cargo.lock
+Cargo.toml
+out.txt
+src
+target
