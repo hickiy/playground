@@ -1,0 +1,8 @@
+version "1.2.3"
+192.168.1.100:443
+Warning: timeout expired
+INFO: Application started
+ERROR: Connection failed
+127.0.0.1:443
+version "2.0.0"
+warning: timeout expired

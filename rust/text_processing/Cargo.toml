@@ -1,0 +1,17 @@
+[package]
+name = "text_processing"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "regular_expression"
+path = "src/regular_expression/main.rs"
+
+[[bin]]
+name = "string_parse"
+path = "src/string_parse/main.rs"
+
+[dependencies]
+lazy_static = "1.5.0"
+regex = "1.11.2"
+unicode-segmentation = "1.12.0"
