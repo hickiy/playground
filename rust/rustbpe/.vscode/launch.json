@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Rust: Debug with Backtrace",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=rustbpe",
+          "--package=rustbpe"
+        ],
+        "filter": {
+          "name": "rustbpe",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": [
+        "rust"
+      ],
+      "preLaunchTask": "rust: build",
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    },
+    "rust-analyzer.checkOnSave.command": "clippy",
+    "rust-analyzer.inlayHints.enable": true,
+    "rust-analyzer.inlayHints.typeHints.enable": true,
+    "rust-analyzer.inlayHints.parameterHints.enable": true,
+    "debug.console": "integratedTerminal",
+    "rust-analyzer.checkOnSave": true
+}

@@ -1,0 +1,65 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "rust: build",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "rust: run",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "rust: check",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "check"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "rust: test",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "rust: clean",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "clean"
+            ]
+        }
+    ]
+}

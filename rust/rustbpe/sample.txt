@@ -1,0 +1,8 @@
+Hello world! This is a simple tokenizer example.
+The quick brown fox jumps over the lazy dog.
+Rust is a systems programming language.
+Byte Pair Encoding is an effective compression technique.
+Machine learning requires careful tokenization.
+Natural language processing is fascinating.
+The tokenizer will learn common word patterns.
+BPE merges frequent byte pairs iteratively.
