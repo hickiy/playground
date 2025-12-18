@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 将 BufReader 转换为迭代器
     let iterator = reader.lines().map(|line| line.unwrap_or_default());
-    tokenizer.train_from_iterator(iterator, vocab_size, None)?;
+    tokenizer.train_from_iterator(iterator, vocab_size, None, false)?;
 
     log::info!("词表训练完成！");
     log::info!("词表大小：{}", tokenizer.get_mergeable_ranks().len());

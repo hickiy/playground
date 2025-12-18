@@ -8,6 +8,9 @@ use ahash::{AHashMap, AHashSet};
 use compact_str::CompactString;
 use rayon::prelude::*;
 
+use std::fs::File;
+use std::io::Write;
+
 // 默认的 GPT-4 风格正则表达式模式，用于分割文本
 const GPT4_PATTERN: &str = r"'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+";
 
@@ -189,7 +192,6 @@ impl Tokenizer {
         // ---- 合并循环 ----
         log::info!("开始合并循环");
         let mut merges_done = 0u32;
-        let mut last_log_percent = 0u32;
 
         while merges_done < num_merges {
             let Some(mut top) = heap.pop() else {
@@ -245,19 +247,16 @@ impl Tokenizer {
             merges_done += 1;
 
             // 每 1% 记录进度
-            let current_percent = (merges_done * 100) / num_merges;
-            if current_percent > last_log_percent {
-                log::info!(
-                    "进度: {}% ({}/{} 次合并) - 最后一次合并: {:?} -> {} (频率: {})",
-                    current_percent,
-                    merges_done,
-                    num_merges,
-                    top.pair,
-                    new_id,
-                    top.count
-                );
-                last_log_percent = current_percent;
-            }
+            let current_percent: u32 = (merges_done * 100) / num_merges;
+            log::info!(
+                "进度: {}% ({}/{} 次合并) - 最后一次合并: {:?} -> {} (频率: {})",
+                current_percent,
+                merges_done,
+                num_merges,
+                top.pair,
+                new_id,
+                top.count
+            );
         }
 
         log::info!("训练完成: 完成了 {} 次合并", merges_done);
@@ -286,6 +285,7 @@ impl Tokenizer {
         iterator: impl Iterator<Item = String>,
         vocab_size: u32,
         pattern: Option<String>,
+        output_a_words_file: bool,
     ) -> Result<(), String> {
         // 使用提供的模式或默认使用 GPT-4 模式
         let pattern_str = pattern.unwrap_or_else(|| GPT4_PATTERN.to_string());
@@ -317,6 +317,18 @@ impl Tokenizer {
             // 将本地合并到全局。
             for (k, v) in local {
                 *counts.entry(k).or_default() += v;
+            }
+
+            if output_a_words_file {
+                // 可选：定期将中间结果写入磁盘以进行检查
+                let path = "./words.txt";
+                let input =
+                    File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
+                let mut writer = std::io::BufWriter::new(input);
+                for (k, v) in &counts {
+                    writeln!(writer, "{:?}\t{}", k, v)
+                        .map_err(|e| format!("Failed to write to file: {}", e))?;
+                }
             }
         }
         log::info!("共处理 {} 个序列，{} 个唯一", total_sequences, counts.len());
@@ -405,7 +417,6 @@ impl Tokenizer {
                     break;
                 }
             }
-
             all_ids.extend(ids);
         }
 
