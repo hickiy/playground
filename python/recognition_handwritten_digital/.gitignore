@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+rustbpe/target/
+dev-ignore/
+report.md
+eval_bundle/
+
+target/
+
+config.toml

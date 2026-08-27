@@ -1,0 +1,14 @@
+[project]
+name = "recognition-handwritten-digital"
+version = "0.1.0"
+description = "MNIST handwritten digit recognition"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "gradio",
+    "numpy",
+    "pillow",
+]
+
+[tool.uv]
