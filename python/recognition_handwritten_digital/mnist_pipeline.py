@@ -9,6 +9,10 @@ CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
 
+PROJECT_BASE_DIR = os.path.join(
+    os.path.expanduser("~"), ".recognition_handwritten_digital"
+)
+
 from config import TrainConfig
 from data.mnist_data import get_dataloaders
 from eval.evaluator import evaluate
@@ -24,11 +28,15 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--data-root", type=str, default="data")
+    parser.add_argument(
+        "--data-root", type=str, default=os.path.join(PROJECT_BASE_DIR, "datasets")
+    )
     parser.add_argument("--dataset-name", type=str, default="mnist")
     parser.add_argument("--model-name", type=str, default="mlp")
     parser.add_argument("--checkpoint", type=str, default="")
-    parser.add_argument("--save-dir", type=str, default="checkpoints")
+    parser.add_argument(
+        "--save-dir", type=str, default=os.path.join(PROJECT_BASE_DIR, "checkpoints")
+    )
     parser.add_argument("--test-only", action="store_true")
 
     args = parser.parse_args()
@@ -46,8 +54,11 @@ def main() -> None:
     train_loader, test_loader = get_dataloaders(cfg)
 
     model = MLP().to(cfg.device)
-    if args.checkpoint:
-        load_checkpoint(model, args.checkpoint, cfg.device)
+    checkpoint_path = args.checkpoint or os.path.join(
+        cfg.checkpoint_dir, f"{cfg.model_name}.pt"
+    )
+    if args.test_only or args.checkpoint:
+        load_checkpoint(model, checkpoint_path, cfg.device)
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
 

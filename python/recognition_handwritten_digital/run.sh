@@ -14,7 +14,7 @@ mkdir -p "$PROJECT_BASE_DIR"/checkpoints
 command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 [ -d ".venv" ] || uv venv
 uv sync
-source .venv/bin/activate
+source .venv/Scripts/activate
 
 # Train + eval + test
 python mnist_pipeline.py \

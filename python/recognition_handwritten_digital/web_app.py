@@ -57,18 +57,33 @@ def preprocess_image(image: Image.Image | np.ndarray | dict) -> torch.Tensor:
         if arr.ndim == 3:
             arr = arr[:, :, 0]
         arr = arr / 255.0
-        img = Image.fromarray((arr * 255).astype(np.uint8), mode="L")
-        img = img.resize((28, 28))
-        arr = np.array(img, dtype=np.float32) / 255.0
     elif isinstance(image, Image.Image):
-        img = image.convert("L").resize((28, 28))
-        arr = np.array(img, dtype=np.float32) / 255.0
+        arr = np.array(image.convert("L"), dtype=np.float32) / 255.0
     else:
         raise ValueError("Unsupported image type from Sketchpad")
 
     # Heuristic: if background is bright, invert to match MNIST (white digit on black)
     if arr.mean() > 0.5:
         arr = 1.0 - arr
+
+    foreground = arr > 0.05
+    if not foreground.any():
+        arr = np.zeros((28, 28), dtype=np.float32)
+    else:
+        rows, cols = np.where(foreground)
+        cropped = Image.fromarray(
+            (arr[rows.min() : rows.max() + 1, cols.min() : cols.max() + 1] * 255).astype(
+                np.uint8
+            ),
+            mode="L",
+        )
+        scale = 20 / max(cropped.size)
+        resized_size = tuple(max(1, round(size * scale)) for size in cropped.size)
+        cropped = cropped.resize(resized_size, Image.Resampling.LANCZOS)
+        canvas = Image.new("L", (28, 28), color=0)
+        offset = tuple((28 - size) // 2 for size in cropped.size)
+        canvas.paste(cropped, offset)
+        arr = np.array(canvas, dtype=np.float32) / 255.0
 
     tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)
     return tensor
