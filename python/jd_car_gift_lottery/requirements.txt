@@ -1,0 +1,2 @@
+# 依赖（安装项目时通过 pyproject.toml 自动安装，此文件供快速参考）
+playwright>=1.40
