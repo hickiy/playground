@@ -133,45 +133,10 @@ def _dump_page_diag(page) -> None:
         pass
 
 
-def _is_actionable(btn) -> bool:
-    """判断兑换按钮是否处于「可点击（未禁用）」状态。
-
-    京东在非刷新时段会禁用该按钮（灰显 / 文案为倒计时、已抢完等），
-    只有 10:00 补充库存后才短暂可点。本函数用于在禁用时跳过点击。
-    """
-    try:
-        if not btn.is_enabled():
-            return False
-    except Exception:
-        pass
-    try:
-        aria = btn.get_attribute("aria-disabled")
-        if aria == "true":
-            return False
-        cls = (btn.get_attribute("class") or "").lower()
-        # 该活动用 `__h1bEZ5 false` 这类 class 标记禁用态
-        if "disabled" in cls or " false" in cls:
-            return False
-    except Exception:
-        pass
-    try:
-        text = btn.inner_text(timeout=300) or ""
-        for bad in (config.SOLD_OUT_TEXT, "抢完", "开抢", "未开始", "即将开始",
-                    "敬请期待", ":"):
-            if bad in text:
-                return False
-    except Exception:
-        pass
-    return True
-
-
 def click_main_button(page) -> bool:
-    """点击底部兑换按钮；仅在按钮处于可点击（未禁用）状态时才点击。"""
+    """点击底部兑换按钮。"""
     btn = find_grab_button(page)
     if btn is None:
-        return False
-    if not _is_actionable(btn):
-        # 禁用/未到开抢时间：跳过点击，避免对禁用按钮做无意义操作
         return False
     try:
         btn.scroll_into_view_if_needed(timeout=1000)
@@ -182,7 +147,10 @@ def click_main_button(page) -> bool:
 
 
 def _button_state(page) -> str:
-    """返回兑换按钮当前状态：ready / disabled / sold_out / none。"""
+    """返回兑换按钮当前状态：ready / sold_out / none。
+
+    只要按钮不包含「已抢完」即视为可点击（ready）。
+    """
     try:
         loc = page.locator(config.GRAB_BUTTON_SELECTOR).first
         if loc.count() == 0:
@@ -190,8 +158,6 @@ def _button_state(page) -> str:
         text = loc.inner_text(timeout=300) or ""
         if config.SOLD_OUT_TEXT in text or "抢完" in text:
             return "sold_out"
-        if not _is_actionable(loc):
-            return "disabled"
         return "ready"
     except Exception:
         return "none"
@@ -287,8 +253,6 @@ def run_grab(page, start_time: datetime, test: bool, duration: int) -> int:
         if state != last_state:
             if state == "ready":
                 log("兑换按钮已进入可点击状态，停止切换，开始点击！")
-            elif state == "disabled":
-                log("兑换按钮当前为禁用状态（未到开抢时间），继续切换商品刷新。")
             elif state == "sold_out":
                 log("检测到【已抢完】，继续切换商品刷新（每天上午10点补充库存）。")
             last_state = state
