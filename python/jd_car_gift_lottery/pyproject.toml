@@ -15,17 +15,8 @@ dependencies = [
     "playwright>=1.40",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-playwright>=0.5",
-]
-
 [project.scripts]
 jd-grab = "src.grab:main"
 
 [tool.setuptools]
 packages = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]

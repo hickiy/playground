@@ -99,14 +99,10 @@ def _switch_products(page) -> bool:
 
 
 def find_grab_button(page):
-    """定位兑换按钮（开抢时段才出现），返回 locator 或 None。"""
-    for sel in config.GRAB_BUTTON_SELECTORS:
-        try:
-            loc = page.locator(sel).first
-            loc.wait_for(state="visible", timeout=1500)
-            return loc
-        except Exception:
-            continue
+    """定位兑换按钮（开抢时段才出现），返回 locator 或 None。
+
+    仅按稳定文案匹配，避免依赖动态生成的哈希类名（如 `div.__4YTNda`）。
+    """
     for text in config.GRAB_BUTTON_TEXTS:
         try:
             loc = page.get_by_text(text, exact=False).first
@@ -151,16 +147,16 @@ def _button_state(page) -> str:
 
     只要按钮不包含「已抢完」即视为可点击（ready）。
     """
+    btn = find_grab_button(page)
+    if btn is None:
+        return "none"
     try:
-        loc = page.locator(config.GRAB_BUTTON_SELECTOR).first
-        if loc.count() == 0:
-            return "none"
-        text = loc.inner_text(timeout=300) or ""
-        if config.SOLD_OUT_TEXT in text or "抢完" in text:
-            return "sold_out"
-        return "ready"
+        text = btn.inner_text(timeout=300) or ""
     except Exception:
         return "none"
+    if config.SOLD_OUT_TEXT in text or "抢完" in text:
+        return "sold_out"
+    return "ready"
 
 
 def try_click_confirm(page) -> bool:
@@ -170,7 +166,8 @@ def try_click_confirm(page) -> bool:
     再遍历候选文案定位并点击确认按钮。
     """
     popup = page.locator(
-        "[class*='popup'], [class*='modal'], [class*='dialog'], [class*='mask']"
+        "[class*='popup'], [class*='modal'], [class*='dialog'], [class*='mask'], "
+        "[class*='layer'], [class*='sheet'], [class*='confirm']"
     ).first
     try:
         if not popup.is_visible(timeout=60):

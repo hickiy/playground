@@ -22,15 +22,31 @@ jd_car_gift_lottery/
 
 ## 安装
 
+本项目使用 [uv](https://docs.astral.sh/uv/) 进行依赖管理。若未安装 uv，请先安装：
+
 ```bash
-pip install -e .
-playwright install chromium
+# Windows（winget）
+winget install astral-sh.uv
+# 或 macOS / Linux
+# curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+在项目根目录执行：
+
+```bash
+# 创建虚拟环境 .venv 并安装项目依赖（含 playwright）
+uv sync
+```
+
+> 本项目通过 CDP 连接**真实 Chrome**（由 `launch_chrome.py` 启动），无需额外安装
+> Playwright 自带的浏览器。若你以后需要让 Playwright 自己启动浏览器（如编写
+> 自动化测试），再执行 `uv run playwright install chromium`。
 
 ## 使用
 
 ```bash
 # 1. 启动带调试端口的真实 Chrome，并在里面手动登录京东
+#    Windows 用 py，macOS/Linux 用 python3
 py launch_chrome.py --port 9222
 
 # 2. 连接该受信任会话执行抢购（默认连接 http://localhost:9222）
