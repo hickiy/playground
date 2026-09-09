@@ -1,0 +1,14 @@
+[project]
+name = "jd-car-gift-lottery"
+version = "0.1.0"
+description = "京东「免费小保养」抢购自动化工具（Playwright + CDP）"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "yanyun" }]
+keywords = ["jd", "playwright", "automation", "login", "grab"]
+dependencies = [
+    "playwright>=1.40",
+]
+
+[tool.uv]
+package = false
