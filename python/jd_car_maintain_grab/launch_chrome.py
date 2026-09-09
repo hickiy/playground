@@ -1,8 +1,8 @@
 """启动带远程调试端口的真实 Google Chrome，供 jd-grab 通过 --cdp 连接。
 
-在启动的 Chrome 里手动登录京东（受信任会话，兑换按钮才会渲染），
+在启动的 Chrome 里手动登录京东（受信任会话，兑换按钮才会渲染），P
 随后运行：
-    jd-grab --cdp http://localhost:9222
+    python -m src.grab --cdp http://localhost:9222
 """
 
 import argparse

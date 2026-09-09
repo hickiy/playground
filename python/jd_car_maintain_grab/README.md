@@ -28,7 +28,7 @@ jd_car_gift_lottery/
 # Windows（winget）
 winget install astral-sh.uv
 # 或 macOS / Linux
-# curl -LsSf https://astral.sh/uv/install.sh | sh
+brew install astral-sh/uv/uv
 ```
 
 在项目根目录执行：
