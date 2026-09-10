@@ -1,24 +1,40 @@
 """京东「免费小保养」抢购模块。
 
-默认在每天 09:59:00 开始，先选中「免费小保养」目标卡片，10:00 放库存后
-轮询点击兑换按钮，自动处理确认弹窗，成功后截图并停止。
+流程很简单：10:00:00 到点后，重复 ROUNDS（10）轮
+    刷新活动页 → 立即点击「立即免费兑换」（按钮不在此状态就马上再刷新，不做等待）
+    → 点击「确认兑换」
+10 轮跑完自动退出。刷新页面本身就会重置按钮与弹窗状态，因此不需要处理
+商品卡片切换、结果弹窗关闭等复杂逻辑。
+
+脚本需在到点前启动：若启动时已经过了设定时间，本次不抢购，直接退出。
 
 登录需在绑定的真实 Chrome（--cdp）中手动完成，京东才会在「受信任会话」里
 渲染「立即免费兑换」按钮。
 """
 
 import argparse
+import re
 import sys
 import time
-from datetime import datetime, timedelta
+import traceback
+from datetime import datetime
 
 from . import config
 from .browser import cdp_browser, ensure_logged_in, log
 
+# ---- 抢购参数 ----
+ROUNDS = 10                    # 刷新 → 点击兑换 → 点击确认 的重复轮数
+PAGE_LOAD_TIMEOUT_MS = 30000   # 页面加载（goto / reload）超时
+CONFIRM_WAIT_MS = 1500         # 点击兑换后等待「确认兑换」弹窗出现的时间
+CLICK_POLL_MS = 50             # 等待弹窗时的轮询间隔
 
-def parse_start(start_str: str | None) -> datetime:
-    """计算开始抢购的时间点，默认今天 09:59:00。"""
-    hh, mm, ss = 9, 59, 0
+
+def resolve_start(start_str: str | None) -> datetime | None:
+    """返回当天的到点抢购时刻，默认今天 10:00:00（放库存时刻）。
+
+    若当前已经过了该时刻，返回 None：脚本必须在到点前启动，过期不补跑。
+    """
+    hh, mm, ss = 10, 0, 0
     if start_str:
         parts = start_str.split(":")
         hh = int(parts[0])
@@ -27,282 +43,204 @@ def parse_start(start_str: str | None) -> datetime:
     now = datetime.now()
     target = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
     if target <= now:
-        # 若只是刚刚错过（如 09:59 之后才启动），立即开始，避免空等一天；
-        # 若距离设定时间较远，则顺延到明天同一时间。
-        if (now - target).total_seconds() <= 600:
-            return now
-        target += timedelta(days=1)
+        return None
     return target
 
 
-def _select_card(page) -> None:
-    """切换到「免费保养」Tab 并选中「免费小保养」卡片。"""
-    try:
-        tab = page.get_by_text(config.GRAB_TAB_TEXT, exact=True).first
-        if tab.is_visible(timeout=1000):
-            tab.click(timeout=2000, force=True)
-            page.wait_for_timeout(500)
-    except Exception:
-        pass
-    try:
-        card = page.locator(config.GRAB_CARD_SELECTOR).first
-        if card.count() == 0:
-            card = page.get_by_text("免费小保养", exact=False).first
-        if card.count():
-            card.click(timeout=3000, force=True)
-            page.wait_for_timeout(300)
-    except Exception:
-        pass
+def wait_until(target: datetime) -> None:
+    """等到目标时刻，毫秒级精度。
 
-
-def _find_target_card(page) -> int:
-    """返回「免费小保养」卡片在商品卡片列表中的索引，找不到返回 -1。"""
-    try:
-        cards = page.locator(".product-info-section")
-        n = cards.count()
-        for i in range(n):
-            try:
-                if "免费小保养" in cards.nth(i).inner_text(timeout=200):
-                    return i
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return -1
-
-
-def _switch_products(page) -> bool:
-    """在两个兑换商品之间切换（最后回到「免费小保养」卡片），以刷新按钮状态。
-
-    切换选中商品会触发页面重新渲染底部按钮；连续切换可让 10:00 补充库存后
-    按钮及时变为可点击状态。返回是否完成了一次切换。
+    `time.sleep` 在 Windows 上有毫秒级抽动，因此先睡到剩 10ms，最后一段
+    用 `perf_counter` 自旋，尽量把误差压到 1ms 以内。
     """
+    deadline = time.perf_counter() + (target - datetime.now()).total_seconds()
+    while True:
+        remain = deadline - time.perf_counter()
+        if remain <= 0:
+            return
+        if remain > 0.01:
+            time.sleep(remain - 0.005)
+
+
+# JS 兜底：按文本精确匹配可见元素并直接触发 click()，
+# 绕过「按钮被弹窗遮罩层挡住导致真实鼠标点击落到遮罩上」的问题。
+_JS_CLICK_BY_TEXT = """
+(keywords) => {
+  const nodes = document.querySelectorAll('div, span, button, a, p');
+  for (const el of nodes) {
+    const t = (el.innerText || '').trim();
+    if (!keywords.includes(t)) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || s.display === 'none') continue;
+    if (s.pointerEvents === 'none') continue;
+    el.click();
+    return t;
+  }
+  return null;
+}
+"""
+
+
+def _find_visible_text_el(page, keyword: str):
+    """查找文本恰为 keyword 的可见元素，返回 locator 或 None。"""
+    pattern = re.compile(r"^\s*" + re.escape(keyword) + r"\s*$")
     try:
-        cards = page.locator(".product-info-section")
-        n = cards.count()
-        target_idx = _find_target_card(page)
-        if n < 2 or target_idx < 0:
-            return False
-        other_idx = (target_idx + 1) % n
-        if other_idx == target_idx:
-            other_idx = (target_idx + 2) % n if n > 2 else -1
-        if other_idx < 0:
-            return False
-        # 先切到其他卡片，再切回目标卡片，触发按钮状态刷新
-        cards.nth(other_idx).click(timeout=2000, force=True)
-        page.wait_for_timeout(120)
-        cards.nth(target_idx).click(timeout=2000, force=True)
-        page.wait_for_timeout(120)
-        return True
+        loc = page.get_by_text(pattern)
+        n = loc.count()
     except Exception:
-        return False
-
-
-def find_grab_button(page):
-    """定位兑换按钮（开抢时段才出现），返回 locator 或 None。
-
-    仅按稳定文案匹配，避免依赖动态生成的哈希类名（如 `div.__4YTNda`）。
-    """
-    for text in config.GRAB_BUTTON_TEXTS:
+        return None
+    for i in range(n):
         try:
-            loc = page.get_by_text(text, exact=False).first
-            if loc.is_visible(timeout=400):
-                return loc
+            el = loc.nth(i)
+            if el.is_visible():
+                return el
         except Exception:
             continue
     return None
 
 
-def _dump_page_diag(page) -> None:
-    """输出当前页面关键信息，便于定位“找不到按钮”的原因。"""
+def _js_click_text(page, keywords) -> str | None:
+    """JS 兜底点击，返回被点击元素的文本，未点到返回 None。"""
     try:
-        log(f"页面标题: {page.title()}")
-        log(f"当前URL: {page.url}")
-        body_text = page.inner_text("body")[:200].replace("\n", " ")
-        log(f"页面文本片段: {body_text}")
+        return page.evaluate(_JS_CLICK_BY_TEXT, list(keywords))
     except Exception:
-        pass
-    try:
-        page.screenshot(path="grab_debug.png")
-        log("已保存诊断截图: grab_debug.png")
-    except Exception:
-        pass
+        return None
 
 
-def click_main_button(page) -> bool:
-    """点击底部兑换按钮。"""
-    btn = find_grab_button(page)
-    if btn is None:
-        return False
-    try:
-        btn.scroll_into_view_if_needed(timeout=1000)
-        btn.click(timeout=800)  # 不用 force，等待按钮真正可点
-        return True
-    except Exception:
-        return False
+def click_text_now(page, keywords, timeout_ms: int = 100) -> str | None:
+    """立即点击第一个可见且文案精确匹配 keywords 的元素，返回该文案。
 
-
-def _button_state(page) -> str:
-    """返回兑换按钮当前状态：ready / sold_out / none。
-
-    只要按钮不包含「已抢完」即视为可点击（ready）。
+    不轮询、不等待：当前不可见就返回 None，由调用方决定下一步（例如刷新后
+    按钮不是「立即免费兑换」状态，就立刻再刷新）。点击优先用真实鼠标点击
+    （带命中测试），被弹窗遮罩拦住时退回 JS 直接触发元素 click。
     """
-    btn = find_grab_button(page)
-    if btn is None:
-        return "none"
-    try:
-        text = btn.inner_text(timeout=300) or ""
-    except Exception:
-        return "none"
-    if config.SOLD_OUT_TEXT in text or "抢完" in text:
-        return "sold_out"
-    return "ready"
-
-
-def try_click_confirm(page) -> bool:
-    """尝试点击确认弹窗中的按钮，返回是否点到了。
-
-    先快速判断是否出现弹窗/遮罩（若无则立即返回，避免拖慢主循环），
-    再遍历候选文案定位并点击确认按钮。
-    """
-    popup = page.locator(
-        "[class*='popup'], [class*='modal'], [class*='dialog'], [class*='mask'], "
-        "[class*='layer'], [class*='sheet'], [class*='confirm']"
-    ).first
-    try:
-        if not popup.is_visible(timeout=60):
-            return False
-    except Exception:
-        return False
-
-    for kw in config.CONFIRM_KEYWORDS:
-        try:
-            loc = page.get_by_text(kw, exact=False).first
-            if loc.is_visible(timeout=200):
-                loc.click(timeout=400, force=True)
-                log(f"点击弹窗按钮: {kw}")
-                return True
-        except Exception:
+    for kw in keywords:
+        el = _find_visible_text_el(page, kw)
+        if el is None:
             continue
-    return False
+        try:
+            el.click(timeout=timeout_ms)
+        except Exception:
+            try:
+                el.evaluate("e => e.click()")
+            except Exception:
+                continue
+        return kw
+    return None
 
 
-def detect_success(page) -> bool:
-    """检测是否出现「成功」弹窗（而非常驻的公示字段），避免误判。"""
+def click_text(page, keywords, wait_ms: int, poll_ms: int = CLICK_POLL_MS) -> str | None:
+    """在 wait_ms 内轮询，点击首个出现的（文案精确匹配）可见元素。
+
+    用于「点击后弹窗需要时间渲染」的场景，如点击兑换后等「确认兑换」出现。
+    返回被点击的文案；超时未出现返回 None。
+    """
+    deadline = time.time() + wait_ms / 1000
+    while True:
+        kw = click_text_now(page, keywords)
+        if kw:
+            return kw
+        kw = _js_click_text(page, keywords)
+        if kw:
+            return kw
+        if time.time() >= deadline:
+            return None
+        page.wait_for_timeout(poll_ms)
+
+
+def run_grab(page, start_time: datetime, test: bool) -> int:
+    """10:00 到点后重复 ROUNDS 轮「刷新 → 点兑换 → 点确认」，返回退出码。"""
+    log("打开活动页...")
     try:
-        for hint in config.MODAL_CLASS_HINTS:
-            candidates = page.locator(f"[class*='{hint}']")
-            count = candidates.count()
-            for i in range(count):
-                el = candidates.nth(i)
-                try:
-                    if not el.is_visible(timeout=100):
-                        continue
-                    txt = el.inner_text(timeout=100)
-                except Exception:
-                    continue
-                if any(k in txt for k in config.SUCCESS_KEYWORDS):
-                    log(f"检测到成功弹窗: {txt.strip()[:40]}")
-                    return True
-        return False
-    except Exception:
-        return False
-
-
-def run_grab(page, start_time: datetime, test: bool, duration: int) -> int:
-    """在给定页面上执行抢购流程，返回是否成功。"""
-    page.goto(config.ACTIVITY_URL, wait_until="domcontentloaded", timeout=30000)
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        pass
-    page.wait_for_timeout(2000)
-
+        page.goto(config.ACTIVITY_URL, wait_until="domcontentloaded",
+                  timeout=PAGE_LOAD_TIMEOUT_MS)
+    except Exception as exc:
+        log(f"打开活动页失败: {exc}")
+        return 1
     if not ensure_logged_in(page, config.ACTIVITY_URL):
         return 1
 
-    # 先选中「免费小保养」卡片
-    _select_card(page)
+    if test:
+        log("测试模式：立即开始抢购。")
+    else:
+        log(f"等待到 {start_time.strftime('%H:%M:%S.%f')[:-3]} 开始抢购...")
+        wait_until(start_time)
+        log(f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} 到点，开始刷新页面抢购。")
 
-    if not test:
-        wait_secs = (start_time - datetime.now()).total_seconds()
-        log(f"将在 {start_time.strftime('%H:%M:%S')} 开始抢购（还需 {wait_secs:.0f} 秒）。")
-        while datetime.now() < start_time:
-            time.sleep(0.1)
-
-    log("开始【切换兑换商品】以刷新按钮状态（每天10点补充库存后转为可点击）...")
-    deadline = time.time() + duration
-    clicks = 0
-    success = False
-    round_no = 0
-    last_state = None
-
-    while time.time() < deadline:
-        # 点击过程中若跳转登录页，重新处理登录
-        if "plogin.m.jd.com" in page.url:
-            log("点击过程中跳转到登录页，处理登录...")
-            if not ensure_logged_in(page, config.ACTIVITY_URL):
-                break
-            _select_card(page)
+    for round_no in range(1, ROUNDS + 1):
+        # 1) 刷新页面：等页面 load 完毕（而非仅 DOM 就绪）后再检查按钮状态，
+        #    同时重置上一轮的按钮与弹窗
+        try:
+            page.reload(wait_until="load", timeout=PAGE_LOAD_TIMEOUT_MS)
+        except Exception as exc:
+            log(f"[{round_no}/{ROUNDS}] 刷新页面失败: {exc}")
             continue
 
-        state = _button_state(page)
-        if state != last_state:
-            if state == "ready":
-                log("兑换按钮已进入可点击状态，停止切换，开始点击！")
-            elif state == "sold_out":
-                log("检测到【已抢完】，继续切换商品刷新（每天上午10点补充库存）。")
-            last_state = state
+        if not ensure_logged_in(page, config.ACTIVITY_URL):
+            log("登录态失效，停止抢购。")
+            return 1
 
-        if state == "ready":
-            # 按钮可点：执行点击 + 确认
-            if click_main_button(page):
-                clicks += 1
-            try_click_confirm(page)
-            if detect_success(page):
-                success = True
-                log("检测到抢购成功！")
-                break
-            time.sleep(0.05)
-        else:
-            # 未可点：切换兑换商品以刷新按钮状态
-            _switch_products(page)
-            time.sleep(0.05)
+        # 2) 立即尝试点击「立即免费兑换」：按钮不在此状态就马上再刷新，不做等待
+        main_hit = click_text_now(page, config.GRAB_BUTTON_TEXTS)
+        if main_hit is None:
+            log(f"[{round_no}/{ROUNDS}] 非「立即免费兑换」状态，立即刷新。")
+            continue
 
-        # 每约 10 秒提示一次，避免长时间无输出
-        round_no += 1
-        if round_no % 200 == 0:
-            log(f"仍在刷新按钮状态（已点击 {clicks} 次）。若长时间未可点，通常为未到开抢时段或已售罄。")
+        # 3) 点击「确认兑换」（弹窗需时间渲染，这里保留轮询等待）
+        confirm_hit = click_text(page, config.CONFIRM_KEYWORDS, CONFIRM_WAIT_MS)
+        log(f"[{round_no}/{ROUNDS}] {main_hit} → {confirm_hit or '确认按钮未出现'}")
 
-    if not success:
-        log(f"未检测到成功。共点击 {clicks} 次，已停止（可加大 --duration 或检查页面）。")
-        _dump_page_diag(page)
-
+    log(f"已完成 {ROUNDS} 轮，退出。")
     try:
         page.screenshot(path="grab_result.png")
         log("已保存截图: grab_result.png")
     except Exception:
         pass
 
-    return 0 if success else 1
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="京东免费小保养自动抢购")
-    parser.add_argument("--start", help="开始时间，格式 HH:MM:SS，默认 09:59:00")
+    parser.add_argument("--start", help="到点抢购时间，格式 HH:MM:SS，默认 10:00:00")
     parser.add_argument("--test", action="store_true", help="立即开始点击（测试模式）")
-    parser.add_argument("--duration", type=int, default=600,
-                        help="最长持续秒数，默认 600 秒")
     parser.add_argument("--cdp", default="http://localhost:9222",
                         help="已登录的真实 Chrome 调试地址，默认 http://localhost:9222")
     args = parser.parse_args()
 
-    start_time = datetime.now() if args.test else parse_start(args.start)
+    start_time = datetime.now() if args.test else resolve_start(args.start)
 
-    with cdp_browser(args.cdp) as (page, context):
-        log(f"已连接到已登录的真实浏览器（CDP: {args.cdp}）。")
-        code = run_grab(page, start_time, args.test, args.duration)
+    # 运行头尾均落日志，便于定时任务执行后核对“有没有按时跑、结果如何”
+    log("=" * 20 + " 京东免费小保养抢购 " + "=" * 20)
 
+    # 已过到点时间才启动：本次不抢购，直接退出（不补跑、不空等到明天）
+    if start_time is None:
+        now = datetime.now()
+        log(f"当前 {now.strftime('%Y-%m-%d %H:%M:%S')} 已过设定开始时间，"
+            f"本次不抢购，直接退出。")
+        log(f"运行结束: {now.strftime('%Y-%m-%d %H:%M:%S')} | 退出码 1")
+        return 1
+
+    log(f"启动: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"目标时刻: {start_time.strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"test={args.test} rounds={ROUNDS} cdp={args.cdp}")
+
+    code = 1
+    try:
+        with cdp_browser(args.cdp) as (page, context):
+            log(f"已连接到已登录的真实浏览器（CDP: {args.cdp}）。")
+            code = run_grab(page, start_time, args.test)
+    except KeyboardInterrupt:
+        log("运行被中断（Ctrl+C）。")
+        code = 130
+    except Exception:
+        # 定时任务无人值守，异常必须留痕（如 Chrome 未启动、CDP 连接失败）
+        log("运行异常终止:\n" + traceback.format_exc().rstrip())
+        code = 1
+
+    log(f"运行结束: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 退出码 {code}")
     return code
 
 
