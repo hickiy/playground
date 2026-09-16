@@ -1,0 +1,18 @@
+# 运行环境
+.venv/
+__pycache__/
+*.py[cod]
+
+# 运行产物
+movies/
+logs/
+chrome_profile/
+
+# 项目自带的二进制（用 scripts/fetch_binaries.py 下载，不入库）
+resources/bin/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

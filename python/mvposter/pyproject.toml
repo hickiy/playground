@@ -1,0 +1,17 @@
+[project]
+name = "mvposter"
+version = "0.2.0"
+description = "用真实 Chrome（CDP）挑视频、yt-dlp 下载的视频下载器"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["youtube", "tiktok", "cdp", "playwright", "yt-dlp", "downloader"]
+dependencies = [
+    "playwright>=1.40",
+    # [default] 附加组会带上官方的 yt-dlp-ejs 脚本包：
+    # YouTube 需要它解 JS 挑战，否则只会警告「部分格式缺失」
+    "yt-dlp[default]>=2024.1.1",
+]
+
+[tool.uv]
+# 不做本地打包：避免触发 setuptools 构建（本项目只以 python -m src.main 运行）
+package = false

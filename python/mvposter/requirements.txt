@@ -1,0 +1,4 @@
+# 依赖列表（快速参考）
+# 正式安装用 uv sync（见 pyproject.toml）
+playwright>=1.40
+yt-dlp[default]>=2024.1.1
