@@ -1,204 +1,118 @@
-"""把 ffmpeg 下载到项目内（resources/bin/<平台>/），免去全局安装。
+"""确保系统里装好了 ffmpeg（yt-dlp 合并分轨、探测格式要用）。
 
-用的是 yt-dlp 官方维护的 FFmpeg 构建（github.com/yt-dlp/FFmpeg-Builds）：
-它带着 yt-dlp 需要的那套编解码器，且随 yt-dlp 一起更新。
+一律装在系统里，项目内不放副本：先看系统里有没有（PATH，以及 winget / Homebrew 的
+目录），没有就用包管理器装——Windows 用 winget，macOS 用 Homebrew。这两个包管理器
+本身也没有的话，就提示你自行安装，不会偷偷改系统，也不往项目里塞文件。
 
 用法:
-    python scripts/fetch_binaries.py            # 已存在则跳过
-    python scripts/fetch_binaries.py --force    # 重新下载
+    python scripts/fetch_binaries.py      # 检测，缺了就装
 
-代理同样只从环境变量读（HTTPS_PROXY / HTTP_PROXY / ALL_PROXY）。
+代理与主程序一致（环境变量 > config.json > 内置默认），装的时候会把代理也传给包管理器。
 """
 
-import argparse
-import hashlib
-import platform
-import shutil
+import os
 import subprocess
 import sys
-import tarfile
-import tempfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src import config                      # noqa: E402
-from src.browser import log                 # noqa: E402
-from src.downloader import mask_proxy, resolve_proxy  # noqa: E402
+from src.browser import log                      # noqa: E402
+from src.downloader import mask_proxy, proxy_source, resolve_proxy, which_binary  # noqa: E402
 
-RELEASE_URL = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/"
-CHECKSUMS = "checksums.sha256"
+# winget 里最常用的完整构建（含 ffmpeg / ffprobe，yt-dlp 社区也常推这个）
+WINGET_PACKAGE = "Gyan.FFmpeg"
 
-
-def binary_names() -> tuple[str, str]:
-    """本平台下两个可执行文件的名字。"""
-    suffix = ".exe" if sys.platform == "win32" else ""
-    return f"ffmpeg{suffix}", f"ffprobe{suffix}"
-
-
-def asset_name() -> str | None:
-    """按平台/架构挑官方构建名；官方没有 macOS 构建，返回 None。"""
-    arch = platform.machine().lower()
-    if sys.platform == "win32":
-        return ("ffmpeg-master-latest-win64-gpl.zip" if arch in ("amd64", "x86_64")
-                else "ffmpeg-master-latest-win32-gpl.zip")
-    if sys.platform.startswith("linux"):
-        return ("ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-                if arch in ("aarch64", "arm64")
-                else "ffmpeg-master-latest-linux64-gpl.tar.xz")
-    return None
+# 没有可用的包管理器（或装不上）时，按平台给一句人话
+MANUAL_HINTS = {
+    "win32": "自己装一下 ffmpeg：从 https://www.gyan.dev/ffmpeg/builds/ 下 zip 后把 bin "
+             "目录加进 PATH；或者先装 winget（Microsoft Store 搜「应用安装程序」）。",
+    "darwin": "自己装一下 ffmpeg：先装 Homebrew（https://brew.sh 一条命令），或从 "
+              "https://ffmpeg.martin-riedl.de/ 下静态构建后放进 PATH。",
+}
 
 
-def _opener(proxy: str | None):
-    """带代理的 urllib opener（代理为空时直连）。"""
-    handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {})
-    return urllib.request.build_opener(handler)
-
-
-def fetch_to(url: str, dest: Path, proxy: str | None) -> str:
-    """下载到 dest，返回内容的 sha256。
-
-    顺带校验 Content-Length：大文件被代理/网络中断时，读取会静默结束，
-    只靠 sha256 是能发现，但先比长度能立刻说出「下得不完整」。
-    """
-    digest = hashlib.sha256()
-    written = 0
-    with _opener(proxy).open(url, timeout=60) as resp, dest.open("wb") as out:
-        declared = int(resp.headers.get("Content-Length") or 0)
-        while chunk := resp.read(1024 * 256):
-            out.write(chunk)
-            digest.update(chunk)
-            written += len(chunk)
-    if declared and written != declared:
-        raise RuntimeError(f"下载不完整：声明 {declared} 字节，实际 {written} 字节")
-    log(f"下载完成：{written / 1024 / 1024:.1f} MB")
-    return digest.hexdigest()
-
-
-def fetch_checksums(proxy: str | None) -> dict[str, str]:
-    """取官方 sha256 清单；取不到就返回空（只告警，不阻断）。"""
+def verify(ffmpeg: str) -> bool:
+    """跑一次 -version，确认这份 ffmpeg 真的能用。"""
     try:
-        with _opener(proxy).open(RELEASE_URL + CHECKSUMS, timeout=60) as resp:
-            text = resp.read().decode("utf-8", errors="replace")
+        done = subprocess.run([ffmpeg, "-version"], capture_output=True,
+                              text=True, timeout=30)
     except Exception as exc:
-        log(f"无法获取校验和清单（跳过校验）：{exc}")
-        return {}
-    table = {}
-    for line in text.splitlines():
-        parts = line.split()
-        if len(parts) == 2:
-            table[parts[1].lstrip("*")] = parts[0].lower()
-    return table
-
-
-def extract(archive: Path, target: Path) -> list[str]:
-    """从压缩包里只取出 ffmpeg / ffprobe，返回落地的文件名列表。"""
-    wanted = set(binary_names())
-    target.mkdir(parents=True, exist_ok=True)
-    found = []
-    if archive.suffix == ".zip":
-        with zipfile.ZipFile(archive) as zf:
-            for member in zf.namelist():
-                name = Path(member).name
-                if name in wanted:
-                    with zf.open(member) as src, (target / name).open("wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    found.append(name)
-    else:
-        with tarfile.open(archive, "r:xz") as tf:
-            for member in tf.getmembers():
-                name = Path(member.name).name
-                if member.isfile() and name in wanted:
-                    src = tf.extractfile(member)
-                    with (target / name).open("wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    found.append(name)
-    if sys.platform != "win32":
-        for name in found:
-            (target / name).chmod(0o755)
-    return found
-
-
-def verify(target: Path) -> bool:
-    """跑一下 -version，确认二进制真的可用（顺便挡住被改坏的文件）。"""
-    ffmpeg = target / binary_names()[0]
-    try:
-        out = subprocess.run([str(ffmpeg), "-version"], capture_output=True,
-                             text=True, timeout=30)
-    except Exception as exc:
-        log(f"验证失败（无法执行 {ffmpeg}）：{exc}")
+        log(f"无法执行 {ffmpeg}：{exc}")
         return False
-    if out.returncode != 0:
-        log(f"验证失败（退出码 {out.returncode}）：{out.stderr.strip()[:200]}")
+    if done.returncode != 0:
+        log(f"执行失败（退出码 {done.returncode}）：{done.stderr.strip()[:200]}")
         return False
-    log(f"验证通过：{out.stdout.splitlines()[0] if out.stdout else ffmpeg}")
+    log(f"可用：{done.stdout.splitlines()[0] if done.stdout else ffmpeg}")
     return True
 
 
+def package_manager() -> list[str] | None:
+    """本平台的安装命令（winget / brew）；没有可用的包管理器就返回 None。"""
+    if sys.platform == "win32":
+        winget = which_binary("winget")
+        if winget:
+            return [winget, "install", "--id", WINGET_PACKAGE, "--exact",
+                    "--accept-package-agreements", "--accept-source-agreements"]
+    elif sys.platform == "darwin":
+        brew = which_binary("brew")
+        if brew:
+            return [brew, "install", "ffmpeg"]
+    return None
+
+
+def run_install(command: list[str], proxy: str | None) -> bool:
+    """跑安装命令：输出直接接到终端（几分钟的进度看得见），代理一并传给它。"""
+    log(f"开始安装：{' '.join(command)}（要几分钟，请稍等）…")
+    env = None
+    if proxy:
+        env = {**os.environ, "HTTPS_PROXY": proxy, "HTTP_PROXY": proxy, "ALL_PROXY": proxy}
+    try:
+        done = subprocess.run(command, env=env, timeout=1800)
+    except Exception as exc:
+        log(f"安装命令失败：{exc}")
+        return False
+    if done.returncode != 0:
+        log(f"安装命令退出码 {done.returncode}。")
+        return False
+    return True
+
+
+def manual_hint() -> str:
+    """手动安装指引（没有包管理器、或包管理器装不上时用）。"""
+    return MANUAL_HINTS.get(
+        sys.platform, "用系统自带的包管理器装 ffmpeg（apt / dnf / pacman 等）。")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="下载 ffmpeg 到项目内，免全局安装")
-    parser.add_argument("--force", action="store_true", help="已存在也重新下载")
-    parser.add_argument("--skip-checksum", action="store_true",
-                        help="跳过 sha256 校验（上游滚动更新导致误报时才用）")
-    args = parser.parse_args()
+    log("=" * 20 + " 检查系统里的 ffmpeg " + "=" * 20)
 
-    target = config.BIN_DIR / sys.platform
-    ffmpeg = target / binary_names()[0]
-    log("=" * 20 + " 下载项目自带 ffmpeg " + "=" * 20)
-    log(f"目标目录：{target}")
-    if ffmpeg.exists() and not args.force:
-        log("已存在，跳过下载（--force 可重新下载）。")
-        return 0
+    ffmpeg = which_binary("ffmpeg")
+    if ffmpeg:
+        log(f"系统里已经有 ffmpeg：{ffmpeg}")
+        return 0 if verify(ffmpeg) else 1
 
-    asset = asset_name()
-    if asset is None:
-        log("官方没有本平台（macOS）的构建。请任选一种："
-            "brew install ffmpeg；或者从 https://evermeet.cx/ffmpeg/ 下载后 "
-            f"放到 {target}（文件名 ffmpeg / ffprobe）。")
+    log("系统里没有找到 ffmpeg，准备用包管理器装。")
+    command = package_manager()
+    if command is None:
+        log("本机没有可用的包管理器（Windows 用 winget，macOS 用 Homebrew）。")
+        log(f"  {manual_hint()}")
         return 1
 
     proxy = resolve_proxy()
-    log(f"代理：{mask_proxy(proxy) if proxy else '未设置（直连）'}")
-    url = RELEASE_URL + asset
-    log(f"下载：{url}")
-
-    work_dir = Path(tempfile.mkdtemp(prefix="mvposter_ffmpeg_"))
-    archive = work_dir / asset
-    try:
-        # 上游是滚动发布（latest 每天重建），代理/CDN 缓存着旧包而校验和已更新时
-        # 会误报，所以不匹配就重下一次；两次都不行再中止。
-        for attempt in (1, 2):
-            digest = fetch_to(url, archive, proxy)
-            if args.skip_checksum:
-                log("已跳过校验和校验（--skip-checksum）。")
-                break
-            expected = fetch_checksums(proxy).get(asset)
-            if not expected:
-                log("未取到官方校验和，跳过校验。")
-                break
-            if expected == digest:
-                log("校验和校验通过。")
-                break
-            log(f"第 {attempt} 次校验不匹配：期望 {expected}，实际 {digest}。")
-        else:
-            log("两次下载的校验和都对不上，已中止（确认无误可用 --skip-checksum）。")
-            return 1
-
-        found = extract(archive, target)
-        if set(found) != set(binary_names()):
-            log(f"压缩包里没找到预期的文件（只拿到 {found or '空'}）。")
-            return 1
-        log(f"已放入：{', '.join(found)}")
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
-
-    if not verify(target):
+    log(f"代理：{mask_proxy(proxy) if proxy else '直连'}（{proxy_source()}）")
+    if not run_install(command, proxy):
+        log(f"安装没成功，可以手动处理：{manual_hint()}")
         return 1
-    log("完成：程序会自动优先使用项目内的 ffmpeg，无需再全局安装。")
-    return 0
+
+    ffmpeg = which_binary("ffmpeg")
+    if not ffmpeg:
+        log("装完了，但当前进程还看不到它——PATH 要新开的终端才刷新："
+            "重开一个终端再跑一次本脚本，或重启 VS Code。")
+        return 1
+    log(f"已装好：{ffmpeg}")
+    return 0 if verify(ffmpeg) else 1
 
 
 if __name__ == "__main__":

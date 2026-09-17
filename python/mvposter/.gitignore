@@ -8,7 +8,7 @@ movies/
 logs/
 chrome_profile/
 
-# 项目自带的二进制（用 scripts/fetch_binaries.py 下载，不入库）
+# 旧版遗留：以前把 ffmpeg 下载到项目内（现在一律装在系统里），留着免得旧副本被误提交
 resources/bin/
 
 # 编辑器 / 系统

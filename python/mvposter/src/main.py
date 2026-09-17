@@ -16,6 +16,7 @@ Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等�
     python -m src.main                 # 进入监听：在 Chrome 里选好视频，回终端按回车
     python -m src.main --auto          # 切到视频页停留 3s 自动下载（同一 URL 只下一次）
     python -m src.main --download URL  # 直接下载该 URL 后退出
+    python -m src.main --platform tiktok --auto   # 只认 TikTok 的视频页，并打开 tiktok.com
 """
 
 import argparse
@@ -72,14 +73,12 @@ def _poll_key() -> str:
 def download_once(context, url: str, title: str, args) -> bool:
     """下载当前标签页指向的视频，返回是否成功。"""
     log(f"开始下载：{title or url}")
-    if not config.is_video_page(url):
+    if not config.is_video_page(url, args.platform):
         log("  该 URL 不在已识别的视频页规则内，仍然交给 yt-dlp 尝试。")
 
     proxy = downloader.resolve_proxy()
-    if proxy:
-        log(f"使用代理（来自环境变量）：{downloader.mask_proxy(proxy)}")
-    else:
-        log("未设置代理环境变量（HTTPS_PROXY / HTTP_PROXY / ALL_PROXY），直连下载。")
+    log(f"下载用代理：{downloader.mask_proxy(proxy) if proxy else '直连'}"
+        f"（{downloader.proxy_source()}）")
 
     cookies_file = None
     try:
@@ -109,7 +108,7 @@ def _auto_step(context, args, page, pending: tuple | None, done: set) -> tuple |
     返回下一轮的 pending（URL, 首次出现时间）；None 表示当前没有待下载目标。
     """
     url = page.url
-    if not config.is_video_page(url) or url in done:
+    if not config.is_video_page(url, args.platform) or url in done:
         if pending is not None:
             log("已切走或已下载过，取消自动下载。")
         return None
@@ -121,6 +120,17 @@ def _auto_step(context, args, page, pending: tuple | None, done: set) -> tuple |
     download_once(context, url, browser.page_title(page), args)
     done.add(url)  # 失败也不重试，避免在同一页循环下载
     return None
+
+
+def _page_mark(url: str, platform: str | None) -> str:
+    """标签页状态提示：属于哪个平台、在当前的 --platform 下会不会被下载。"""
+    keyword = config.platform_of(url)
+    if keyword is None:
+        return "未识别为视频页"
+    name = config.PLATFORMS[keyword].name
+    if config.is_video_page(url, platform):
+        return f"{name} 视频页 ✓"
+    return f"{name} 视频页（当前只下 {config.PLATFORMS[platform].name}）"
 
 
 def watch(context, args) -> int:
@@ -145,7 +155,7 @@ def watch(context, args) -> int:
 
         if page.url != current_url:
             current_url = page.url
-            mark = "视频页 ✓" if config.is_video_page(current_url) else "未识别为视频页"
+            mark = _page_mark(current_url, args.platform)
             log(f"当前标签页：{browser.page_title(page) or '(无标题)'} [{mark}]")
             log(f"  {current_url}")
 
@@ -173,36 +183,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="直接下载指定 URL 后退出（不进入监听）")
     parser.add_argument("--quality", choices=downloader.QUALITIES, default="1080",
                         help="清晰度上限，默认 1080；best 表示不限")
+    parser.add_argument("--platform", choices=("auto", *config.PLATFORMS), default="auto",
+                        help="只把指定站点的页面当视频页（"
+                             + "/".join(config.PLATFORMS) + "；auto 表示所有站点，默认）")
     parser.add_argument("--port", type=int, default=config.DEFAULT_PORT,
                         help=f"Chrome 调试端口，默认 {config.DEFAULT_PORT}")
     parser.add_argument("--profile", default=config.DEFAULT_PROFILE,
                         help=f"Chrome 用户数据目录（登录态存这里），默认 {config.DEFAULT_PROFILE}")
     parser.add_argument("--chrome", help="Chrome/Edge 可执行文件路径，默认自动查找")
-    parser.add_argument("--open", dest="open_url", default=config.DEFAULT_OPEN_URL,
-                        help=f"启动 Chrome 时打开的地址，默认 {config.DEFAULT_OPEN_URL}")
-    return parser.parse_args(argv)
+    parser.add_argument("--open", dest="open_url",
+                        help="启动 Chrome 时打开的地址，默认跟着 --platform 走"
+                             f"（未指定平台时是 {config.DEFAULT_OPEN_URL}）")
+    args = parser.parse_args(argv)
+    if args.platform == "auto":
+        args.platform = None
+    if args.open_url is None:
+        # 没显式给 --open 就跟着平台走：选哪个平台就打开它的首页
+        args.open_url = (config.PLATFORMS[args.platform].home if args.platform
+                         else config.DEFAULT_OPEN_URL)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     log("=" * 20 + " MVPoster 视频下载器 " + "=" * 20)
     log(f"下载目录：{config.MOVIES_DIR}（每次下载按当天日期自动建子目录）")
+    if args.platform:
+        log(f"平台：{config.PLATFORMS[args.platform].name}（只把该站点的页面当视频页）")
+    else:
+        names = "、".join(p.name for p in config.PLATFORMS.values())
+        log(f"平台：auto（识别 {names} 的视频页）")
 
     proxy = downloader.resolve_proxy()
-    if proxy:
-        log(f"代理：{downloader.mask_proxy(proxy)}（来自环境变量）")
-    else:
-        log("代理：未设置（HTTPS_PROXY / HTTP_PROXY / ALL_PROXY），将直连")
+    log(f"代理：{downloader.mask_proxy(proxy) if proxy else '直连'}（{downloader.proxy_source()}）")
     ffmpeg = downloader.find_ffmpeg()
     if ffmpeg:
         log(f"ffmpeg：{ffmpeg}")
     else:
-        log("警告：未找到 ffmpeg。运行 python scripts/fetch_binaries.py 可下载到项目内"
-            "（推荐，免全局安装）；否则高于 720p 的分轨视频将无法合并。")
+        log("警告：未找到 ffmpeg。运行 python scripts/fetch_binaries.py 可用 "
+            "winget / Homebrew 装到系统；否则高于 720p 的分轨视频将无法合并。")
     if not downloader.find_js_runtime():
         log("提示：未找到 node，yt-dlp 解 YouTube 的 JS 挑战时会缺少部分格式。")
 
-    if not browser.ensure_cdp(args):
+    if not browser.ensure_cdp(args, proxy):
         return 1
 
     code = 1

@@ -104,9 +104,13 @@ def cdp_reachable(cdp_url: str, timeout_s: float = 1.0) -> bool:
         return False
 
 
-def launch_chrome(port: int, profile: str, url: str,
-                  chrome_path: str | None = None) -> bool:
-    """启动带远程调试端口的真实 Chrome，返回是否成功拉起进程。"""
+def launch_chrome(port: int, profile: str, url: str, chrome_path: str | None = None,
+                  proxy: str | None = None) -> bool:
+    """启动带远程调试端口的真实 Chrome，返回是否成功拉起进程。
+
+    proxy 非空时加 --proxy-server：Chrome 默认吃系统代理，得显式传一个，
+    「登录过程」才和下载用的是同一个代理。
+    """
     chrome = chrome_path or find_chrome()
     if not chrome:
         log("未找到 Chrome/Edge，请用 --chrome 指定可执行文件路径。")
@@ -114,16 +118,19 @@ def launch_chrome(port: int, profile: str, url: str,
     profile_dir = Path(profile).resolve()
     profile_dir.mkdir(parents=True, exist_ok=True)
     log(f"启动 Chrome: {chrome}（调试端口 {port}，用户数据目录 {profile_dir}）")
+    command = [
+        chrome,
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
+        # 关掉「关闭窗口后继续在后台运行」：否则窗口关了 chrome.exe 还留着，
+        # 既占着用户数据目录的锁，也让「退出时关掉 Chrome」名不副实。
+        "--disable-background-mode",
+    ]
+    if proxy:
+        command.append(f"--proxy-server={proxy}")
+    command.append(url)
     try:
-        subprocess.Popen([
-            chrome,
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile_dir}",
-            # 关掉「关闭窗口后继续在后台运行」：否则窗口关了 chrome.exe 还留着，
-            # 既占着用户数据目录的锁，也让「退出时关掉 Chrome」名不副实。
-            "--disable-background-mode",
-            url,
-        ])
+        subprocess.Popen(command)
     except Exception as exc:
         log(f"启动 Chrome 失败: {exc}")
         return False
@@ -141,18 +148,20 @@ def wait_for_cdp(cdp_url: str, timeout_ms: int = config.CDP_WAIT_MS) -> bool:
         time.sleep(0.2)
 
 
-def ensure_cdp(args) -> bool:
+def ensure_cdp(args, proxy: str | None = None) -> bool:
     """确保存在一个可连的、带调试端口的 Chrome。
 
     已经开着调试端口就直接复用（退出时也不会去关别人的窗口）；否则自己拉起
-    一个，退出时负责关闭。
+    一个（带上 proxy），退出时负责关闭。
     """
     global _we_launched
     cdp_url = f"http://localhost:{args.port}"
     if cdp_reachable(cdp_url):
         log(f"复用已开启调试端口的 Chrome（{cdp_url}），退出时不会关闭它。")
+        if proxy:
+            log("提示：复用这个 Chrome 时 --proxy-server 不生效，它沿用原来的代理设置。")
         return True
-    if not launch_chrome(args.port, args.profile, args.open_url, args.chrome):
+    if not launch_chrome(args.port, args.profile, args.open_url, args.chrome, proxy):
         return False
     if not wait_for_cdp(cdp_url):
         log(f"等待 {cdp_url} 就绪超时。若这个用户数据目录已被另一个正在运行的 Chrome "

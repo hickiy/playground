@@ -43,9 +43,21 @@
 判断（CDP 不提供「选中了哪个 tab」这种字段）；页面标题/URL 变化时才会在终端打日志，
 所以终端不会被刷屏。
 
-## 代理：只从环境变量读
+## 代理与配置（config.json）
 
-不给 `--proxy` 开关（命令行参数会进 shell 历史、进程列表和日志）：
+浏览器（登录过程）和 yt-dlp（下载）**默认都走 `http://127.0.0.1:1080`**。这个默认值写在项目
+根目录的 `config.json` 里，直接改它即可：
+
+```json
+{
+  "proxy": "http://127.0.0.1:1080"
+}
+```
+
+- 想直连：把 `proxy` 改成空串 `""`。
+- 想换端口 / 换机器：改这个地址就行（写 `127.0.0.1:7890` 这种不带协议头的也认）。
+- 不想改文件时可以用环境变量临时覆盖：按 `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`
+  的顺序取第一个非空值（大小写都认）。
 
 ```bash
 # Windows PowerShell
@@ -55,9 +67,19 @@ $env:HTTPS_PROXY = "http://127.0.0.1:7890"; python -m src.main
 export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
 ```
 
-按 `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY` 的顺序取第一个非空值（大小写都认）。
-日志里只打印打码后的地址（`http://***@host:port`）。yt-dlp 自己不会读这些变量，
-所以是程序读出来显式传给它的。
+优先级：**环境变量 > `config.json` > 内置默认值**。启动日志会写明当前用的是哪个代理、
+打哪来的，例如 `代理：http://127.0.0.1:1080（config.json 里的 proxy）`。
+
+实现上的几个约定：
+
+- Chrome 用 `--proxy-server=<proxy>` 启动，所以**登录过程**也走同一个代理；但复用已经
+  开着的 Chrome 时该参数不生效（日志会提示一句），它沿用自己原来的代理设置。
+- yt-dlp 自己不会读环境变量、也不会读 `config.json`，所以是程序读出来显式传给它的。
+- 日志里只打印打码后的地址（`http://***@host:port`）。
+- 不给 `--proxy` 开关：命令行参数会进 shell 历史、进程列表和日志。要放带用户名密码的
+  代理，就写在 `config.json` 里（顺带注意别把带密码的 `config.json` 提交进仓库）。
+- 默认值指向的是**本机**端口。若本机没跑代理，程序启动时会说明一句并**改走直连**，
+  不会让浏览器和下载一起卡死（远端代理不探测，避免网络抖动被当成没配）。
 
 ## 系统要求
 
@@ -65,8 +87,9 @@ export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
 - Python 3.10+ 与 [uv](https://docs.astral.sh/uv/)（依赖管理）
 - 可选：Node.js 22+（yt-dlp 解 YouTube 的 JS 挑战要用；没装也能下，但可能缺格式）
 
-**不需要全局安装任何东西**（不用 `winget install ffmpeg`、不用 `pip install yt-dlp`）：
-yt-dlp 与官方 EJS 脚本包装进项目里的 `.venv`，ffmpeg 由项目脚本下载到 `resources/bin/<平台>/`。
+**依赖就两处，都不用你手敲包管理器**：yt-dlp 与官方 EJS 脚本包装进项目里的 `.venv`
+（不用 `pip install yt-dlp`），ffmpeg 由脚本用 `winget` / `brew` 装到**系统**里
+（`python scripts/fetch_binaries.py`，已经装好就跳过）。
 
 ```bash
 # Windows
@@ -81,7 +104,7 @@ brew install uv
 # 1. Python 依赖装进项目内的 .venv（yt-dlp[default] = yt-dlp + 官方 EJS 脚本包）
 uv sync
 
-# 2. 把 ffmpeg / ffprobe 下载到项目内（一次性；已存在会跳过，镜像/代理同样读环境变量）
+# 2. 确保系统里有 ffmpeg（一次性；已装好会跳过，缺了自动用 winget / Homebrew 装）
 python scripts/fetch_binaries.py
 
 # 3. 运行（用项目内 .venv 的解释器）
@@ -93,21 +116,23 @@ python scripts/fetch_binaries.py
 不需要 `playwright install`：本程序只通过 CDP 连接**系统里的真实 Chrome**，
 不使用 Playwright 自带的 Chromium。
 
-### 依赖都是项目本地的
+### 依赖放在哪
 
 | 依赖 | 放在哪 | 说明 |
 |---|---|---|
 | yt-dlp + yt-dlp-ejs | `.venv/`（`uv sync` 装的 Python 包） | 不进 PATH、不动系统环境；EJS 是官方挑战脚本包，缺了 YouTube 会少一批格式 |
-| ffmpeg / ffprobe | `resources/bin/<平台>/` | 程序**优先**用项目内这份，找不到才回退到 PATH 里全局装的那个 |
+| ffmpeg / ffprobe | 系统里（PATH、winget 的 `Links`、Homebrew 的 `bin`） | yt-dlp 合并分轨要用；由 `scripts/fetch_binaries.py` 用包管理器装上 |
 | Chrome / Edge | 系统里已装的浏览器 | 登录态、选视频都在这里，不打包、不内嵌 |
 
-- ffmpeg 来源是 yt-dlp 官方维护的构建（<https://github.com/yt-dlp/FFmpeg-Builds>），
-  脚本会按平台/架构自动挑包，下载后对照官方 `checksums.sha256` 校验、再执行一次
-  `ffmpeg -version` 验证可用性（`--force` 重下、`--skip-checksum` 跳过校验）。
-- **macOS 官方没有对应构建**：脚本会提示用 `brew install ffmpeg`，或自行下载后把
-  `ffmpeg` / `ffprobe` 放进 `resources/bin/darwin/`。
-- 换机器重跑一次第 2 步即可；`resources/bin/` 已在 `.gitignore` 里（若想连二进制一起入库，
-  删掉那一行即可）。
+- ffmpeg 一律装在系统里：脚本先检测（PATH，以及 Windows 的
+  `%LOCALAPPDATA%\Microsoft\WinGet\Links`、macOS 的 `/opt/homebrew/bin`、`/usr/local/bin`），
+  缺了就用 `winget install Gyan.FFmpeg`（Windows）或 `brew install ffmpeg`（macOS）装，
+  装完立刻跑一次 `ffmpeg -version` 验证。
+- 没有可用的包管理器（Windows 没有 winget、macOS 没有 Homebrew）时，脚本**只提示**手动
+  安装方式，不会自己下 zip、也不往项目里塞文件。
+- 万一 ffmpeg 还是缺着，下载视频时会自动降级为只挑「音视频已合体」的格式
+  （不用合并，清晰度通常最多 720p），不会直接报错。
+- 换机器重跑一次第 2 步即可（脚本幂等：装好了就直接跳过）。
 
 
 ## 使用
@@ -125,6 +150,10 @@ python -m src.main --download "https://www.youtube.com/watch?v=xxxx"
 
 # 限制清晰度（默认 1080，best 表示不限）
 python -m src.main --quality 720
+
+# 指定平台：只把该站点的页面当视频页，并默认打开它的首页
+python -m src.main --platform youtube          # 只认 YouTube 视频页
+python -m src.main --platform tiktok --auto    # 只认 TikTok，并打开 tiktok.com
 ```
 
 ### 参数一览
@@ -135,11 +164,16 @@ python -m src.main --quality 720
 | `--auto-delay` | 自动模式的停留秒数，默认 `3` |
 | `--download URL` | 直接下载该 URL 后退出，不进入监听 |
 | `--quality` | `1080`（默认）/ `720` / `480` / `360` / `best` |
+| `--platform` | `auto`（默认，识别所有已支持站点）/ `youtube` / `tiktok`：只把该站点的页面当视频页 |
 | `--port` | Chrome 调试端口，默认 `9222` |
 | `--profile` | Chrome 用户数据目录，默认 `./chrome_profile`（**登录态存在这里**） |
 | `--chrome` | Chrome/Edge 可执行文件路径，默认自动查找 |
-| `--open` | 启动 Chrome 时打开的地址，默认 `https://www.youtube.com` |
+| `--open` | 启动 Chrome 时打开的地址，默认跟着 `--platform` 走（`auto` 时是 `https://www.youtube.com`） |
 
+- `--platform` 有两点作用：① 只有该站点的页面才算视频页（自动模式不会对其他站点触发下载，
+  终端提示里会写明「当前只下 X」）；② 没显式传 `--open` 时，启动 Chrome 打开的就是它的首页。
+  想加平台只需在 `src/config.py` 的 `PLATFORMS` 里加一条（关键字 → 显示名 / 视频页正则 /
+  首页），命令行会自动多出一个可选值。
 - 首次使用：程序会打开一个**全新的 Chrome 窗口**（用户数据目录是 `chrome_profile/`，
   与你日常用的 Chrome 互不影响），在里面登录 YouTube / TikTok，登录态会留在该目录里，
   下次直接复用，不用再登。用 `q` 或 Ctrl+C 退出。
@@ -179,15 +213,15 @@ movies/
 mvposter/
 ├── pyproject.toml      # 项目元数据与依赖（uv）
 ├── requirements.txt    # 依赖列表（快速参考）
+├── config.json         # 运行配置（代理地址等，可直接改）
 ├── README.md
 ├── scripts/
-│   └── fetch_binaries.py  # 下载 ffmpeg 到项目内（免全局安装）
+│   └── fetch_binaries.py  # 检查 / 安装系统级 ffmpeg（winget / Homebrew）
 ├── src/
-│   ├── config.py       # 目录、视频页规则、Chrome/CDP 参数、代理环境变量名
+│   ├── config.py       # 目录、视频站点规则、Chrome/CDP 参数、代理与配置文件路径
 │   ├── browser.py      # 日志、启动/连接 Chrome、当前标签页、导出 cookies
 │   ├── downloader.py   # yt-dlp 封装：代理、movies/<日期>、格式与进度
 │   └── main.py         # 唯一入口：监听当前标签页 + 触发下载
-├── resources/bin/      # 项目自带的 ffmpeg / ffprobe（脚本下载，不入库）
 ├── movies/             # 下载产物（运行时生成，按日期分目录）
 ├── logs/               # 按天分的执行日志（运行时生成）
 └── chrome_profile/     # Chrome 用户数据目录（运行时生成，登录态）
@@ -199,4 +233,5 @@ mvposter/
 - 下载的视频版权归原作者所有。
 - 视频站点的页面结构或风控变化可能导致下载失败，此时先升级 `yt-dlp`
   （`uv lock --upgrade-package yt-dlp && uv sync`）再试。
-- 二进制想更新到最新构建时重跑 `python scripts/fetch_binaries.py --force`。
+- 升级 ffmpeg：`winget upgrade Gyan.FFmpeg`（Windows）/ `brew upgrade ffmpeg`（macOS）；
+  项目内不再放副本，旧版本遗留的 `resources/bin/` 可以直接删掉。

@@ -1,13 +1,17 @@
-"""用 yt-dlp 下载视频：产物落在 movies/<日期>/，代理只从环境变量读。
+"""用 yt-dlp 下载视频：产物落在 movies/<日期>/，代理默认走本机 127.0.0.1:1080。
 
 yt-dlp 以库的形式调用（不依赖外部 yt-dlp 可执行文件）；ffmpeg 只在合并分轨
 格式时用得上，优先用项目自带的 `resources/bin/<平台>/`（见 scripts/fetch_binaries.py），
 没有才回退到系统 PATH。
+代理的取值顺序是「环境变量 > config.json > 内置默认」，细节见下面的 proxy 一节。
 """
 
+import json
 import os
 import shutil
+import socket
 import sys
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -19,17 +23,88 @@ from .browser import log
 # --quality 允许的档位；best 表示不限高度
 QUALITIES = ("1080", "720", "480", "360", "best")
 
+_proxy_cache: tuple[str | None, str] | None = None  # 一次运行只解析一次（含探测端口）
+_LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
-def resolve_proxy() -> str | None:
-    """从环境变量取代理地址；都没有则返回 None（直连）。
 
-    yt-dlp 自己不会读 HTTP(S)_PROXY，必须显式传给它，所以在这里读一次。
+def load_config() -> dict:
+    """读项目根目录的 config.json；文件不在就用内置默认值。
+
+    读不了 / 内容不是 JSON 对象时只告警，不影响运行。
     """
+    path = config.CONFIG_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(f"读 {path.name} 失败，改用内置默认值：{exc}")
+        return {}
+    if not isinstance(data, dict):
+        log(f'{path.name} 的内容应该是一个 JSON 对象（形如 {{"proxy": "..."}}），已忽略。')
+        return {}
+    return data
+
+
+def _with_scheme(proxy: str) -> str:
+    """补上协议头：配置里写 127.0.0.1:1080 也认。"""
+    return proxy if "://" in proxy else f"http://{proxy}"
+
+
+def _local_proxy_alive(proxy: str) -> bool:
+    """探一下本机代理的端口是不是真的有人监听。
+
+    默认值指向本机服务，机器上没跑代理时硬用会连浏览器都打不开，所以只对
+    127.0.0.1 / localhost 这种本机地址探测；远端代理不探（网络抖动不能当成没配）。
+    """
+    parts = urllib.parse.urlsplit(proxy)
+    if parts.hostname not in _LOOPBACK or not parts.port:
+        return True
+    try:
+        with socket.create_connection((parts.hostname, parts.port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _pick_proxy() -> tuple[str | None, str]:
+    """定下用哪个代理、以及它是打哪来的：(地址, 来源说明)，地址为 None 表示直连。"""
     for name in config.PROXY_ENV_VARS:
         value = (os.environ.get(name) or "").strip()
         if value:
-            return value
-    return None
+            return _with_scheme(value), f"环境变量 {name}"
+    if config.CONFIG_FILE.exists():
+        raw = load_config().get("proxy")
+        if raw is not None:
+            text = str(raw).strip()
+            return (_with_scheme(text) if text else None), f"{config.CONFIG_FILE.name} 里的 proxy"
+    return _with_scheme(config.DEFAULT_PROXY), "内置默认值"
+
+
+def _resolve_proxy() -> tuple[str | None, str]:
+    """解析并缓存代理设置：一次运行只算一次，也避免重复探测端口。"""
+    global _proxy_cache
+    if _proxy_cache is None:
+        proxy, source = _pick_proxy()
+        if proxy and not _local_proxy_alive(proxy):
+            log(f"代理 {mask_proxy(proxy)}（{source}）连不上，本次改为直连；"
+                f"要改就编辑 {config.CONFIG_FILE.name} 的 proxy。")
+            proxy, source = None, f"{source}，但连不上，已改直连"
+        _proxy_cache = (proxy, source)
+    return _proxy_cache
+
+
+def resolve_proxy() -> str | None:
+    """本次运行要用的代理地址；None 表示直连。
+
+    yt-dlp 自己不会读 HTTP(S)_PROXY，也不会读 config.json，必须显式传给它。
+    """
+    return _resolve_proxy()[0]
+
+
+def proxy_source() -> str:
+    """代理地址的来源说明（日志里讲清楚「为什么是这个代理」）。"""
+    return _resolve_proxy()[1]
 
 
 def mask_proxy(proxy: str) -> str:
@@ -47,14 +122,21 @@ def day_dir(now: datetime | None = None) -> Path:
     return target
 
 
-def build_format(quality: str) -> str:
+def build_format(quality: str, muxed_only: bool = False) -> str:
     """把 --quality 档位转成 yt-dlp 的格式表达式。
 
     清晰度优先、编解码器其次：偏好必须写在选择器里，而不是用 format_sort——
     否则低分辨率的「音视频已合体」格式会同时命中 vcodec / acodec 两个偏好，
     反而排到 1080p 的分轨格式前面（实测 1080p 会下成 360p）。
+
+    muxed_only=True 用于没有 ffmpeg 的情况：分轨格式下完也合不了，只能挑已合体的。
     """
     limit = "" if quality == "best" else f"[height<={int(quality)}]"
+    if muxed_only:
+        return "/".join([
+            f"b{limit}[vcodec^=avc]",  # 已合体的格式里同样优先 H.264
+            f"b{limit}",
+        ])
     return "/".join([
         f"bv{limit}[vcodec^=avc]+ba[acodec^=mp4a]",  # 首选 H.264 视频 + AAC 音频
         f"bv{limit}[vcodec^=avc]+ba",
@@ -64,22 +146,40 @@ def build_format(quality: str) -> str:
     ])
 
 
-def find_ffmpeg() -> str | None:
-    """找 ffmpeg：先用项目自带的，再退到系统 PATH。
+def which_binary(name: str) -> str | None:
+    """在 PATH 里找可执行文件，找不到再补几个常见目录。
 
-    项目自带（resources/bin/<平台>/）由 scripts/fetch_binaries.py 下载，
-    这样不必全局安装 ffmpeg。
+    - macOS：Homebrew 的两个前缀（从访达 / VS Code 启动时 PATH 里常常没有）；
+    - Windows：winget 的 shim 目录（刚用它装完 ffmpeg 的进程不用重开终端）。
     """
-    name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
-    local = config.BIN_DIR / sys.platform / name
-    if local.exists():
-        return str(local)
-    return shutil.which("ffmpeg")
+    found = shutil.which(name)
+    if found:
+        return found
+    if sys.platform == "darwin":
+        prefixes = ("/opt/homebrew/bin", "/usr/local/bin")
+    elif sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        prefixes = (str(Path(local) / "Microsoft" / "WinGet" / "Links"),) if local else ()
+    else:
+        prefixes = ()
+    for prefix in prefixes:
+        candidate = Path(prefix) / name
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def find_ffmpeg() -> str | None:
+    """找 ffmpeg：一律用系统里那份（PATH，或 winget / Homebrew 的目录）。
+
+    安装交给 scripts/fetch_binaries.py（winget / Homebrew），项目内不再放副本。
+    """
+    return which_binary("ffmpeg")
 
 
 def find_js_runtime() -> str | None:
     """找 Node：yt-dlp 解 YouTube 的 JS 挑战要用（缺了会拿不到部分格式）。"""
-    return shutil.which("node")
+    return which_binary("node")
 
 
 class _Logger:
@@ -138,11 +238,15 @@ def download(url: str, quality: str = "1080", proxy: str | None = None,
              cookies_file: Path | None = None) -> Path | None:
     """下载单个视频到 movies/<当天>/，返回最终文件路径；失败返回 None。"""
     out_dir = day_dir()
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        log("没找到 ffmpeg：分轨格式下完合不了，降级为只挑「音视频已合体」的格式"
+            "（清晰度通常最多 720p；跑一次 scripts/fetch_binaries.py 可装上 ffmpeg）。")
     options = {
         "paths": {"home": str(out_dir)},
         # 文件名带视频 id：重名/改名都不怕，也便于去重
         "outtmpl": {"default": "%(title).100s [%(id)s].%(ext)s"},
-        "format": build_format(quality),
+        "format": build_format(quality, muxed_only=not ffmpeg),
         "merge_output_format": "mp4",
         "noplaylist": True,
         "windowsfilenames": True,  # 去掉 Windows 不允许的字符
@@ -157,7 +261,6 @@ def download(url: str, quality: str = "1080", proxy: str | None = None,
         options["cookiefile"] = str(cookies_file)
     if proxy:
         options["proxy"] = proxy
-    ffmpeg = find_ffmpeg()
     if ffmpeg:
         options["ffmpeg_location"] = str(Path(ffmpeg).parent)
     if find_js_runtime():
