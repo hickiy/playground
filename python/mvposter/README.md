@@ -85,11 +85,13 @@ export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
 
 - Chrome 或 Edge（Windows / macOS / Linux 常见安装位置会自动找到，也可 `--chrome` 指定）
 - Python 3.10+ 与 [uv](https://docs.astral.sh/uv/)（依赖管理）
+- **ffmpeg**（yt-dlp 合并分轨、探测格式要用；程序启动时会检查，缺了就提示安装方式并退出）
 - 可选：Node.js 22+（yt-dlp 解 YouTube 的 JS 挑战要用；没装也能下，但可能缺格式）
 
-**依赖就两处，都不用你手敲包管理器**：yt-dlp 与官方 EJS 脚本包装进项目里的 `.venv`
-（不用 `pip install yt-dlp`），ffmpeg 由脚本用 `winget` / `brew` 装到**系统**里
-（`python scripts/fetch_binaries.py`，已经装好就跳过）。
+**Python 依赖不用你手敲包管理器**：yt-dlp 与官方 EJS 脚本包装进项目里的 `.venv`
+（不用 `pip install yt-dlp`）。**ffmpeg 归你自己装到系统里**，程序只检查、不代装，
+也不往项目里放副本——macOS 用 `brew install ffmpeg`，Windows 用
+`winget install Gyan.FFmpeg`。
 
 ```bash
 # Windows
@@ -104,8 +106,9 @@ brew install uv
 # 1. Python 依赖装进项目内的 .venv（yt-dlp[default] = yt-dlp + 官方 EJS 脚本包）
 uv sync
 
-# 2. 确保系统里有 ffmpeg（一次性；已装好会跳过，缺了自动用 winget / Homebrew 装）
-python scripts/fetch_binaries.py
+# 2. 装好系统级 ffmpeg（一次性）
+brew install ffmpeg            # macOS
+winget install Gyan.FFmpeg     # Windows
 
 # 3. 运行（用项目内 .venv 的解释器）
 .venv\Scripts\python.exe -m src.main      # Windows
@@ -121,18 +124,16 @@ python scripts/fetch_binaries.py
 | 依赖 | 放在哪 | 说明 |
 |---|---|---|
 | yt-dlp + yt-dlp-ejs | `.venv/`（`uv sync` 装的 Python 包） | 不进 PATH、不动系统环境；EJS 是官方挑战脚本包，缺了 YouTube 会少一批格式 |
-| ffmpeg / ffprobe | 系统里（PATH、winget 的 `Links`、Homebrew 的 `bin`） | yt-dlp 合并分轨要用；由 `scripts/fetch_binaries.py` 用包管理器装上 |
+| ffmpeg / ffprobe | 系统里（PATH、winget 的 `Links`、Homebrew 的 `bin`） | yt-dlp 合并分轨要用；**由你自己装**（`brew install ffmpeg` / `winget install Gyan.FFmpeg`） |
 | Chrome / Edge | 系统里已装的浏览器 | 登录态、选视频都在这里，不打包、不内嵌 |
 
-- ffmpeg 一律装在系统里：脚本先检测（PATH，以及 Windows 的
-  `%LOCALAPPDATA%\Microsoft\WinGet\Links`、macOS 的 `/opt/homebrew/bin`、`/usr/local/bin`），
-  缺了就用 `winget install Gyan.FFmpeg`（Windows）或 `brew install ffmpeg`（macOS）装，
-  装完立刻跑一次 `ffmpeg -version` 验证。
-- 没有可用的包管理器（Windows 没有 winget、macOS 没有 Homebrew）时，脚本**只提示**手动
-  安装方式，不会自己下 zip、也不往项目里塞文件。
-- 万一 ffmpeg 还是缺着，下载视频时会自动降级为只挑「音视频已合体」的格式
-  （不用合并，清晰度通常最多 720p），不会直接报错。
-- 换机器重跑一次第 2 步即可（脚本幂等：装好了就直接跳过）。
+- ffmpeg 一律用系统里那份：程序启动时先检测（PATH，以及 Windows 的
+  `%LOCALAPPDATA%\Microsoft\WinGet\Links`、macOS 的 `/opt/homebrew/bin`、`/usr/local/bin`）。
+- **检测不到就直接停下**：打印本平台的安装方式（macOS 是 `brew install ffmpeg`，
+  Windows 是 `winget install Gyan.FFmpeg`，Linux 是 `apt install ffmpeg` 等）并以退出码
+  `1` 退出，不会带着缺失的依赖继续跑——分轨格式下完合不了，只会白花流量和时间。
+- 程序不代装、不动系统环境，也不往项目里塞二进制副本：装什么、怎么装由你决定。
+- 升级 ffmpeg 也用系统包管理器：`brew upgrade ffmpeg` / `winget upgrade Gyan.FFmpeg`。
 
 
 ## 使用
@@ -215,8 +216,6 @@ mvposter/
 ├── requirements.txt    # 依赖列表（快速参考）
 ├── config.json         # 运行配置（代理地址等，可直接改）
 ├── README.md
-├── scripts/
-│   └── fetch_binaries.py  # 检查 / 安装系统级 ffmpeg（winget / Homebrew）
 ├── src/
 │   ├── config.py       # 目录、视频站点规则、Chrome/CDP 参数、代理与配置文件路径
 │   ├── browser.py      # 日志、启动/连接 Chrome、当前标签页、导出 cookies
@@ -234,4 +233,4 @@ mvposter/
 - 视频站点的页面结构或风控变化可能导致下载失败，此时先升级 `yt-dlp`
   （`uv lock --upgrade-package yt-dlp && uv sync`）再试。
 - 升级 ffmpeg：`winget upgrade Gyan.FFmpeg`（Windows）/ `brew upgrade ffmpeg`（macOS）；
-  项目内不再放副本，旧版本遗留的 `resources/bin/` 可以直接删掉。
+  项目内不放副本，旧版本遗留的 `resources/bin/` 可以直接删掉。

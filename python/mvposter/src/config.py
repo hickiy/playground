@@ -8,7 +8,8 @@ from typing import NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 MOVIES_DIR = ROOT / "movies"   # 下载产物：movies/<日期>/<标题>.<ext>
 LOG_DIR = ROOT / "logs"        # 按天分的执行日志
-# ffmpeg 不再放在项目内，而是装在系统里，见 scripts/fetch_binaries.py
+# ffmpeg 不放在项目内，也不由本程序安装：要求用户装在系统里（PATH / Homebrew / winget），
+# 启动时检查不到就提示安装方式并退出
 
 # ---- Chrome / CDP ----
 DEFAULT_PORT = 9222

@@ -1,8 +1,8 @@
 """用 yt-dlp 下载视频：产物落在 movies/<日期>/，代理默认走本机 127.0.0.1:1080。
 
-yt-dlp 以库的形式调用（不依赖外部 yt-dlp 可执行文件）；ffmpeg 只在合并分轨
-格式时用得上，优先用项目自带的 `resources/bin/<平台>/`（见 scripts/fetch_binaries.py），
-没有才回退到系统 PATH。
+yt-dlp 以库的形式调用（不依赖外部 yt-dlp 可执行文件）；ffmpeg 用它合并分轨格式，
+只用系统里那份（PATH，或 Homebrew / winget 的目录），项目内不放副本——程序启动时
+会检查有没有，缺了就提示安装指引并退出（见 src/main.py 的 require_ffmpeg）。
 代理的取值顺序是「环境变量 > config.json > 内置默认」，细节见下面的 proxy 一节。
 """
 
@@ -122,21 +122,14 @@ def day_dir(now: datetime | None = None) -> Path:
     return target
 
 
-def build_format(quality: str, muxed_only: bool = False) -> str:
+def build_format(quality: str) -> str:
     """把 --quality 档位转成 yt-dlp 的格式表达式。
 
     清晰度优先、编解码器其次：偏好必须写在选择器里，而不是用 format_sort——
     否则低分辨率的「音视频已合体」格式会同时命中 vcodec / acodec 两个偏好，
     反而排到 1080p 的分轨格式前面（实测 1080p 会下成 360p）。
-
-    muxed_only=True 用于没有 ffmpeg 的情况：分轨格式下完也合不了，只能挑已合体的。
     """
     limit = "" if quality == "best" else f"[height<={int(quality)}]"
-    if muxed_only:
-        return "/".join([
-            f"b{limit}[vcodec^=avc]",  # 已合体的格式里同样优先 H.264
-            f"b{limit}",
-        ])
     return "/".join([
         f"bv{limit}[vcodec^=avc]+ba[acodec^=mp4a]",  # 首选 H.264 视频 + AAC 音频
         f"bv{limit}[vcodec^=avc]+ba",
@@ -170,11 +163,26 @@ def which_binary(name: str) -> str | None:
 
 
 def find_ffmpeg() -> str | None:
-    """找 ffmpeg：一律用系统里那份（PATH，或 winget / Homebrew 的目录）。
+    """找 ffmpeg：只用系统里那份（PATH，或 Homebrew / winget 的目录）。
 
-    安装交给 scripts/fetch_binaries.py（winget / Homebrew），项目内不再放副本。
+    程序不代装 ffmpeg、项目内也不放副本；找不到时由 src/main.py 提示安装并退出。
     """
     return which_binary("ffmpeg")
+
+
+# 没装 ffmpeg 时的安装指引（按平台给一句能直接照做的话）
+FFMPEG_HINTS = {
+    "win32": "winget install Gyan.FFmpeg（或从 https://www.gyan.dev/ffmpeg/builds/ 下 zip，"
+             "把里面的 bin 目录加进 PATH）",
+    "darwin": "brew install ffmpeg（还没装 Homebrew 就先跑 https://brew.sh 上的那行命令）",
+}
+
+
+def ffmpeg_hint() -> str:
+    """本平台的 ffmpeg 安装指引（日志里直接用）。"""
+    return FFMPEG_HINTS.get(
+        sys.platform, "apt install ffmpeg（Debian/Ubuntu）/ dnf install ffmpeg / "
+                      "pacman -S ffmpeg，按你的发行版选")
 
 
 def find_js_runtime() -> str | None:
@@ -238,15 +246,13 @@ def download(url: str, quality: str = "1080", proxy: str | None = None,
              cookies_file: Path | None = None) -> Path | None:
     """下载单个视频到 movies/<当天>/，返回最终文件路径；失败返回 None。"""
     out_dir = day_dir()
+    # 启动时已经确认过 ffmpeg 存在（见 src/main.py 的 require_ffmpeg）
     ffmpeg = find_ffmpeg()
-    if not ffmpeg:
-        log("没找到 ffmpeg：分轨格式下完合不了，降级为只挑「音视频已合体」的格式"
-            "（清晰度通常最多 720p；跑一次 scripts/fetch_binaries.py 可装上 ffmpeg）。")
     options = {
         "paths": {"home": str(out_dir)},
         # 文件名带视频 id：重名/改名都不怕，也便于去重
         "outtmpl": {"default": "%(title).100s [%(id)s].%(ext)s"},
-        "format": build_format(quality, muxed_only=not ffmpeg),
+        "format": build_format(quality),
         "merge_output_format": "mp4",
         "noplaylist": True,
         "windowsfilenames": True,  # 去掉 Windows 不允许的字符

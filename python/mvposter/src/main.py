@@ -17,6 +17,9 @@ Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等�
     python -m src.main --auto          # 切到视频页停留 3s 自动下载（同一 URL 只下一次）
     python -m src.main --download URL  # 直接下载该 URL 后退出
     python -m src.main --platform tiktok --auto   # 只认 TikTok 的视频页，并打开 tiktok.com
+
+前置条件：系统里装有 ffmpeg（yt-dlp 合并分轨要用，程序不代装）——启动时检查，
+找不到就打印安装方式并以退出码 1 退出。
 """
 
 import argparse
@@ -204,6 +207,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def require_ffmpeg() -> bool:
+    """确认系统里装了 ffmpeg：装了返回 True，没装就打印安装指引并返回 False。
+
+    ffmpeg 由用户自己装（程序不代装、也不往项目里放副本）：yt-dlp 合并分轨、
+    探测可用格式都要用它，缺了就只能下低清晰度的合体格式，所以直接拦在启动阶段。
+    """
+    ffmpeg = downloader.find_ffmpeg()
+    if ffmpeg:
+        log(f"ffmpeg：{ffmpeg}")
+        return True
+    log("错误：系统里没有找到 ffmpeg（PATH 与 Homebrew / winget 的目录都没有）。")
+    log("  本程序用它合并视频与音频，请先装好再运行：")
+    log(f"  {downloader.ffmpeg_hint()}")
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     log("=" * 20 + " MVPoster 视频下载器 " + "=" * 20)
@@ -216,12 +235,9 @@ def main(argv: list[str] | None = None) -> int:
 
     proxy = downloader.resolve_proxy()
     log(f"代理：{downloader.mask_proxy(proxy) if proxy else '直连'}（{downloader.proxy_source()}）")
-    ffmpeg = downloader.find_ffmpeg()
-    if ffmpeg:
-        log(f"ffmpeg：{ffmpeg}")
-    else:
-        log("警告：未找到 ffmpeg。运行 python scripts/fetch_binaries.py 可用 "
-            "winget / Homebrew 装到系统；否则高于 720p 的分轨视频将无法合并。")
+    if not require_ffmpeg():
+        log("运行结束 | 退出码 1（缺 ffmpeg，未启动 Chrome）")
+        return 1
     if not downloader.find_js_runtime():
         log("提示：未找到 node，yt-dlp 解 YouTube 的 JS 挑战时会缺少部分格式。")
 
