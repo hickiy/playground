@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TauriServoLab",
+  "version": "0.1.0",
+  "identifier": "dev.local.tauri-servo-lab",
+  "build": {
+    "frontendDist": "../web",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": {
+      "script": "node scripts/dev-server.js",
+      "cwd": ".."
+    }
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tauri × Servo 探索台",
+        "width": 1040,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 520,
+        "resizable": true,
+        "url": "index.htm"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["versoview/versoview"]
+  }
+}

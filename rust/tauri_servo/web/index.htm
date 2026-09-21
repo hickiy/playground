@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Servo 探索台 · 概览</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Early exploration</p>
+      <h1>Tauri &times; Servo 探索台</h1>
+      <p class="sub">同一个 Tauri 外壳，把渲染引擎从 WebView2 换成 Servo（via Verso runtime）。</p>
+    </div>
+    <span class="badge" id="runtime-badge">检测中…</span>
+  </header>
+  <nav class="nav">
+    <button type="button" data-page="index.htm">概览</button>
+    <button type="button" data-page="compat.htm">兼容性矩阵</button>
+    <button type="button" data-page="metrics.htm">运行时指标</button>
+  </nav>
+  <section class="grid" id="cards">
+    <p class="loading">正在探测当前引擎能力…</p>
+  </section>
+  <footer class="foot"><span id="foot-note">正在初始化…</span></footer>
+</div>
+<script src="common.js"></script>
+<script src="probes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

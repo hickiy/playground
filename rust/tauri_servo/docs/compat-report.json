@@ -1,0 +1,960 @@
+{
+  "runtime": "Servo / Verso",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Servo/1.0 Firefox/111.0",
+  "collectedAt": "2026-09-21T04:20:58.116Z",
+  "durationMs": 13.51,
+  "results": [
+    {
+      "group": "引擎身份",
+      "name": "userAgent",
+      "kind": "value",
+      "state": "info",
+      "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Servo/1.0 Firefox/111.0"
+    },
+    {
+      "group": "引擎身份",
+      "name": "appName",
+      "kind": "value",
+      "state": "info",
+      "value": "Netscape"
+    },
+    {
+      "group": "引擎身份",
+      "name": "appVersion",
+      "kind": "value",
+      "state": "info",
+      "value": "4.0"
+    },
+    {
+      "group": "引擎身份",
+      "name": "platform",
+      "kind": "value",
+      "state": "info",
+      "value": "Win32"
+    },
+    {
+      "group": "引擎身份",
+      "name": "language",
+      "kind": "value",
+      "state": "info",
+      "value": "en-US"
+    },
+    {
+      "group": "引擎身份",
+      "name": "hardwareConcurrency",
+      "kind": "value",
+      "state": "info",
+      "value": 12
+    },
+    {
+      "group": "引擎身份",
+      "name": "deviceMemory",
+      "kind": "value",
+      "state": "info",
+      "value": "—"
+    },
+    {
+      "group": "引擎身份",
+      "name": "devicePixelRatio",
+      "kind": "value",
+      "state": "info",
+      "value": 1
+    },
+    {
+      "group": "引擎身份",
+      "name": "window.isSecureContext",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "引擎身份",
+      "name": "Tauri 宿主 (__TAURI__)",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "Canvas 2D",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "WebGL 1",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "WebGL 2",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "WebGPU",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "OffscreenCanvas",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "OffscreenCanvas 2D",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "Path2D",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "ImageBitmap",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "requestAnimationFrame",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "CSS transform 3D",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "CSS filter",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "backdrop-filter",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "mix-blend-mode",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "clip-path",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "CSS 渐变",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "SVG (内联)",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "IntersectionObserver",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "图形与渲染",
+      "name": "ResizeObserver",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "Flexbox",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "CSS Grid",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "CSS Grid（行为验证）",
+      "kind": "support",
+      "state": "warn",
+      "note": "计算值 = block",
+      "value": "部分"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "CSS 自定义属性",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "gap (flex)",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": ":has()",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "is() / where()",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "CSS 嵌套",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "容器查询",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "@layer",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "aspect-ratio",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "position: sticky",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "color-scheme",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "scroll-behavior",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "prefers-color-scheme",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "矢量字体 (woff2)",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "web font 加载 API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "accent-color",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "CSS 布局与新特性",
+      "name": "text-wrap: balance",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "可选链 ?.",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "空值合并 ??",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "class 私有字段",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "class 静态块",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "顶层 await",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "逻辑赋值 ||=",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "数值分隔符",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Object.hasOwn",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Array.at",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Array.flat",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "structuredClone",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Intl.Segmenter",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Intl.RelativeTimeFormat",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "BigInt",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "WeakRef",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "FinalizationRegistry",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "JavaScript 语言特性",
+      "name": "Temporal",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Shadow DOM",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Custom Elements",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "<dialog>",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "popover 属性",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "MutationObserver",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Pointer Events",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "拖放 Drag & Drop",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "剪贴板事件",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "异步剪贴板 API",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "全屏 API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Selection API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "元素滚动 API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "DOMParser",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Range API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Web Animations API",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "View Transitions",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "DOM 与事件",
+      "name": "Compression Streams",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "localStorage 可写",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "sessionStorage 可写",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "IndexedDB",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "Cache Storage",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "Cookie 可写",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "navigator.storage.estimate",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "File API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "File System Access",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "存储与持久化",
+      "name": "网络是否在线",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "fetch",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "XMLHttpRequest",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "WebSocket",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "EventSource (SSE)",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "Web Worker",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "SharedWorker",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "Service Worker",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "SharedArrayBuffer",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "Atomics",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "AbortController",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "ReadableStream",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "WebAssembly",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "WASM SIMD",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "WebRTC",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "网络与并发",
+      "name": "WebTransport",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "<audio>",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "MediaRecorder",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "getUserMedia",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Web Audio API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Speech Synthesis",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Notification API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Vibration API",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Geolocation",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Gamepad API",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "WebXR",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "屏幕方向 API",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Battery Status",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Touch Events",
+      "kind": "support",
+      "state": "ok",
+      "note": "",
+      "value": "支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Payment Request",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    },
+    {
+      "group": "媒体与其它",
+      "name": "Credential Management",
+      "kind": "support",
+      "state": "bad",
+      "note": "",
+      "value": "不支持"
+    }
+  ]
+}

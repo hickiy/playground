@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Servo 探索台 · 运行时指标</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Metrics</p>
+      <h1>运行时指标</h1>
+      <p class="sub">页面侧可观测到的数据。打包体积、冷启动耗时、进程内存由 scripts/bench.js 在外部采集。</p>
+    </div>
+    <span class="badge" id="runtime-badge">检测中…</span>
+  </header>
+  <nav class="nav">
+    <button type="button" data-page="index.htm">概览</button>
+    <button type="button" data-page="compat.htm">兼容性矩阵</button>
+    <button type="button" data-page="metrics.htm">运行时指标</button>
+  </nav>
+
+  <section class="toolbar">
+    <button type="button" id="btn-refresh">刷新</button>
+    <button type="button" id="btn-copy">复制 JSON</button>
+    <span class="spacer"></span>
+    <span class="pill" id="stat-done">—</span>
+  </section>
+
+  <section class="grid" id="cards">
+    <p class="loading">正在采集…</p>
+  </section>
+
+  <footer class="foot"><span id="foot-note">正在初始化…</span></footer>
+</div>
+<script src="common.js"></script>
+<script src="probes.js"></script>
+<script src="metrics.js"></script>
+</body>
+</html>

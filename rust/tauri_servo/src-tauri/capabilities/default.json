@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "探索台的默认权限集：只授予核心能力，不开放文件系统、shell 等高危接口。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

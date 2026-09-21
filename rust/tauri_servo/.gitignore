@@ -1,0 +1,12 @@
+# Rust 构建产物
+src-tauri/target/
+tools/**/target/
+
+# tauri-runtime-verso-build 下载的 Servo webview 二进制
+src-tauri/versoview/
+
+# tauri-build 生成的权限 schema
+src-tauri/gen/schemas/
+
+node_modules/
+*.log

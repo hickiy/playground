@@ -1,0 +1,40 @@
+[package]
+name = "tauri-servo-lab"
+version = "0.1.0"
+description = "用 Tauri 外壳驱动 Servo 渲染引擎（via Verso runtime）的早期探索应用"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+tauri-runtime-verso-build = { git = "https://github.com/versotile-org/tauri-runtime-verso.git" }
+
+[dependencies]
+# 关掉默认特性是为了不带上 Tauri 默认的 wry 后端，
+# 但示例表明 wry 特性仍需保留（tauri 的默认 runtime 类型定义依赖它）。
+tauri = { version = "2", default-features = false, features = [
+    "wry",
+    "common-controls-v6",
+    "dynamic-acl",
+] }
+tauri-runtime-verso = { git = "https://github.com/versotile-org/tauri-runtime-verso.git" }
+serde = { version = "1", features = ["derive"] }
+
+[features]
+# Tauri 用这个 feature 区分「开发」与「发布」：启用时 webview 加载嵌入的前端资源，
+# 不启用时加载 `build.devUrl` 指向的开发服务器（见 tauri.conf.json）。
+# `tauri build` 会自动带上它；日常 `cargo run` 则走 devUrl。
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.dev]
+# 开发期保留增量编译，缩短「改代码 -> 看到窗口」的循环。
+incremental = true
+
+[profile.release]
+# 与打包体积直接相关：优先体积而不是极致速度。
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

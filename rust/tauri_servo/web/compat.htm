@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Servo 探索台 · 兼容性矩阵</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Compatibility</p>
+      <h1>Web 兼容性矩阵</h1>
+      <p class="sub">同一份检测代码会在 Servo 与 WebView2 下分别运行，用于量化两者的能力差距。</p>
+    </div>
+    <span class="badge" id="runtime-badge">检测中…</span>
+  </header>
+  <nav class="nav">
+    <button type="button" data-page="index.htm">概览</button>
+    <button type="button" data-page="compat.htm">兼容性矩阵</button>
+    <button type="button" data-page="metrics.htm">运行时指标</button>
+  </nav>
+
+  <section class="toolbar">
+    <input id="filter" type="search" placeholder="按名称或分组过滤…" />
+    <span class="pill ok" id="stat-ok">通过 0</span>
+    <span class="pill warn" id="stat-warn">部分 0</span>
+    <span class="pill bad" id="stat-bad">不支持 0</span>
+    <span class="spacer"></span>
+    <button type="button" id="btn-rerun">重新探测</button>
+    <button type="button" id="btn-copy">复制 JSON</button>
+  </section>
+
+  <section class="card">
+    <div id="compat-list"></div>
+  </section>
+
+  <footer class="foot"><span id="foot-note">正在初始化…</span></footer>
+</div>
+<script src="common.js"></script>
+<script src="probes.js"></script>
+<script src="compat.js"></script>
+</body>
+</html>

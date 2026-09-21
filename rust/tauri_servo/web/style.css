@@ -1,0 +1,199 @@
+:root {
+  --bg: #0f1115;
+  --card: #171a21;
+  --card-hover: #1d212a;
+  --line: #262b36;
+  --fg: #e6e9ef;
+  --muted: #8b93a7;
+  --accent: #4cc2ff;
+  --ok: #3ecf8e;
+  --warn: #f0b429;
+  --bad: #ff6b6b;
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 20% -10%, #1b2430 0%, var(--bg) 55%);
+  color: var(--fg);
+  font: 14px/1.55 "Segoe UI", system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+#app { max-width: 1040px; margin: 0 auto; padding: 32px 24px 48px; }
+
+.hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+.sub { margin: 8px 0 0; color: var(--muted); max-width: 56ch; }
+
+.badge {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.servo { color: var(--ok); border-color: #23533f; }
+.badge.webview2 { color: var(--accent); border-color: #1d4258; }
+
+.nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
+
+/* 导航按钮与工具条按钮共用同一套外观 */
+.nav button,
+.toolbar button {
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+.nav button:hover,
+.toolbar button:hover { background: var(--card-hover); border-color: #38404f; }
+.nav button:active,
+.toolbar button:active { transform: translateY(1px); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(255,255,255,.05);
+}
+.row:last-child { border-bottom: 0; }
+.row .k { color: var(--muted); flex: none; }
+.row .v {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.v.ok { color: var(--ok); }
+.v.bad { color: var(--bad); }
+.v.warn { color: var(--warn); }
+
+/* --- 工具条与状态药丸 --- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 16px;
+}
+.toolbar .spacer { flex: 1 1 auto; }
+
+.toolbar input[type="search"] {
+  flex: 1 1 200px;
+  min-width: 160px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+}
+.toolbar input[type="search"]:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(76, 194, 255, .15);
+}
+
+.pill {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pill.ok { color: var(--ok); border-color: #23533f; }
+.pill.warn { color: var(--warn); border-color: #574620; }
+.pill.bad { color: var(--bad); border-color: #5a2b2b; }
+
+/* --- 兼容性矩阵列表 --- */
+#compat-list { display: flex; flex-direction: column; }
+
+#compat-list .group {
+  margin: 14px 0 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+#compat-list .group:first-child { margin-top: 0; }
+
+#compat-list .item {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, .05);
+}
+#compat-list .item:last-child { border-bottom: 0; }
+#compat-list .name { overflow-wrap: anywhere; }
+#compat-list .value {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#compat-list .item .pill { justify-self: end; }
+
+.badge.gecko { color: #ffb86c; border-color: #5a4526; }
+.badge.chromium { color: var(--accent); border-color: #1d4258; }
+
+.loading, .foot { color: var(--muted); }
+.foot { margin-top: 26px; font-size: 12.5px; font-family: var(--mono); }
