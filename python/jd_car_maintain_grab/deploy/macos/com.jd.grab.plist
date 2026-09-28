@@ -26,6 +26,13 @@
     <key>ProcessType</key>
     <string>Interactive</string>
 
+    <!-- 显式保持默认值 false：任务结束（含异常/被终止）时由 launchd 清掉同组的残留
+         进程——主要是脚本启动的 Chrome。残留的 Chrome 会一直占着 --user-data-dir，
+         下次启动时新进程把命令行交给它后自己退出，调试端口起不来，抢购必然失败。
+         脚本自己会优雅关闭 Chrome，这里只是兜底。 -->
+    <key>AbandonProcessGroup</key>
+    <false/>
+
     <key>StandardOutPath</key>
     <string>__PROJECT_DIR__/logs/launchd.out.log</string>
     <key>StandardErrorPath</key>

@@ -19,13 +19,17 @@ SSR + 弹窗结构下很不稳定——`locator.click()` 会超时，`click(forc
   - 不带 h5st 也能通过校验；
   - 但 body 必须携带 jsToken，否则返回 F30001「您操作频率过快」；
   - 参数正确时返回业务码，如 1711000 成功、1711001「当前参与人数过多」。
+
+页面/连接中途丢失（Playwright 的 TargetClosedError）不在这里吞掉，而是抛
+`PageLostError` 交给上层恢复会话：抢购只有到点那一瞬的机会，在死页面上重试
+再多次也不会有一个请求发出去。
 """
 
 import json
 import time
 
 from . import config
-from .browser import log
+from .browser import PageLostError, is_page_lost, log
 
 SKU_POLL_MS = 500  # 等待页面活动数据加载时的轮询间隔
 
@@ -109,6 +113,9 @@ def read_sku_params(page, sku_id: str, timeout_ms: int = 30000) -> dict | None:
         try:
             sku = page.evaluate(_JS_READ_SKU.replace("__SKU_ID__", sku_id))
         except Exception as exc:
+            if is_page_lost(exc):
+                # 页面/连接已经没了：抛给上层恢复会话后重读，别当成「读不到参数」
+                raise PageLostError(f"读取兑换参数: {exc}") from exc
             log(f"读取兑换参数失败: {exc}")
             return None
         if sku and sku.get("activityWareId") and sku.get("activityId"):
@@ -137,6 +144,10 @@ def exchange(page, sku: dict, service_type: str = "jdxc") -> dict:
     try:
         raw = page.evaluate(expression)
     except Exception as exc:
+        if is_page_lost(exc):
+            # 页面/连接已经没了：抛给上层重开会话。把它当成一次普通失败继续打没有
+            # 意义——死页面上再打多少次都不会有请求发出去，而份额就在那一瞬。
+            raise PageLostError(f"调用兑换接口: {exc}") from exc
         return {"code": "PageError", "msg": str(exc)}
     try:
         return json.loads(raw)

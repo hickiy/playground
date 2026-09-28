@@ -18,4 +18,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 cd "$PROJECT_DIR"
+
+# 先留一行「包装脚本被调用了」的痕迹（带日期），便于和日志里的抢购记录对齐核对；
+# 注意别在同一时间重复启动：两次运行会复用同一个 Chrome 与调试端口，双倍发请求。
+echo "[$(date '+%F %T')] run_grab.sh 启动（cwd=$PROJECT_DIR，参数: ${*:-（无）}）"
+
 exec /usr/bin/caffeinate -dims "$PYTHON" -m src.grab "$@"
