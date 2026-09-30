@@ -20,13 +20,18 @@ launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -E 'state|program' || t
 
 cat <<'EOF'
 
-安装完成。还需要两步才能真正按时抢到：
+安装完成。还需要三步才能真正按时抢到：
 
-1) 定时唤醒——launchd 不会唤醒睡眠中的 Mac，需要 sudo：
+1) 先手动启动一次常驻 Chrome（定时任务只连接它，不会自己启动浏览器）：
+     .venv/bin/python launch_browser.py
+   窗口关了也没关系，Chrome 进程会留在后台、调试端口一直可用。
+   检查端口：.venv/bin/python launch_browser.py --check
+
+2) 定时唤醒——launchd 不会唤醒睡眠中的 Mac，需要 sudo：
      sudo pmset repeat wakeorpoweron MTWRFSU 09:45:00
    查看：pmset -g sched
 
-2) 确认这台 Mac 持续接电源（caffeinate 的 -s 断言只在 AC 下有效）、
+3) 确认这台 Mac 持续接电源（caffeinate 的 -s 断言只在 AC 下有效）、
    已登录京东且未被注销，时区正确（--start 用的是本机时间）。
 
 试跑（会真的调用兑换接口）：launchctl kickstart -k gui/$(id -u)/com.jd.grab

@@ -1,7 +1,5 @@
 """共享的浏览器启动/连接、登录检测与日志工具。"""
 
-import os
-import signal
 import subprocess
 import sys
 import time
@@ -137,7 +135,12 @@ def launch_chrome(port: int, profile: str, url: str,
                   chrome_path: str | None = None) -> bool:
     """启动带远程调试端口的真实 Chrome，返回是否成功拉起进程。
 
-    用真实用户数据目录，登录态可跨次复用；调试端口供脚本自己连接。
+    只由 `launch_browser.py`（手动启动）调用：抢购脚本不自己拉起浏览器，而是
+    连接这个常驻实例。用真实用户数据目录，登录态可跨次复用。
+
+    **不要**加 `--disable-background-mode`：带调试端口的 Chrome 默认启用后台
+    模式，窗口关掉后进程仍留驻、调试端口继续可用——这正是「CDP 随时可连接」
+    的前提。
     """
     chrome = chrome_path or find_chrome()
     if not chrome:
@@ -170,102 +173,8 @@ def wait_for_cdp(cdp_url: str, timeout_ms: int = 15000) -> bool:
         time.sleep(0.2)
 
 
-_browser = None          # 当前 CDP 浏览器连接，供退出时清理
-_browser_pid = None      # Chrome 浏览器进程 PID，供终端被关闭时的兜底清理
-_console_handler = None  # Win32 控制台回调，必须保持引用以免被 GC
-
-
-def _remember_browser_pid(browser) -> None:
-    """记录浏览器进程 PID——终端被关闭时无法使用 Playwright，只能按 PID 结束进程。"""
-    global _browser_pid
-    try:
-        session = browser.new_browser_cdp_session()
-        info = session.send("SystemInfo.getProcessInfo")
-        for proc in info.get("processInfo") or []:
-            if proc.get("type") == "browser":
-                _browser_pid = proc.get("id")
-                break
-    except Exception:
-        pass
-
-
-def _close_browser() -> None:
-    """关闭通过 CDP 连上的 Chrome（含窗口）；幂等，可重复调用。
-
-    只能在 Playwright 所在线程调用：对 CDP 连接直接调 browser.close() 只会
-    断开连接，需显式发送 CDP 的 Browser.close 才能真正关掉 Chrome。
-    """
-    global _browser, _browser_pid
-    browser, _browser = _browser, None
-    if browser is None:
-        return
-    try:
-        browser.new_browser_cdp_session().send("Browser.close")
-        _browser_pid = None  # 已优雅关闭，无需再按 PID 处理
-        log("已关闭 Chrome 窗口。")
-    except Exception:
-        pass
-
-
-def _kill_browser_process() -> None:
-    """兜底：按 PID 结束 Chrome 进程（可从任意线程调用）。
-
-    优雅关闭失败时必须真的杀掉：残留的 Chrome 会一直占着 `--user-data-dir`，
-    下次启动时新进程会把命令行交给它然后自己退出，调试端口起不来，抢购必然失败。
-    Windows 用 taskkill（顺带结束子进程），macOS/Linux 先 TERM 再 KILL。
-    """
-    global _browser_pid
-    pid, _browser_pid = _browser_pid, None
-    if not pid:
-        return
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                           capture_output=True, timeout=5)
-        else:
-            os.kill(pid, signal.SIGTERM)
-            deadline = time.time() + 2
-            while time.time() < deadline:
-                try:
-                    os.kill(pid, 0)  # 探活：进程还在就不会抛异常
-                except ProcessLookupError:
-                    break
-                time.sleep(0.2)
-            else:
-                os.kill(pid, signal.SIGKILL)
-        log("已关闭 Chrome 窗口（强制结束进程）。")
-    except ProcessLookupError:
-        pass  # 已经退出了，无需处理
-    except Exception:
-        pass
-
-
-def _install_console_close_handler() -> None:
-    """Windows：捕获「关闭终端窗口/注销/关机」事件，先关 Chrome 再退出。
-
-    Ctrl+C（CTRL_C）不在此处理，交由 KeyboardInterrupt 走 finally 分支。
-    """
-    global _console_handler
-    if _console_handler is not None or sys.platform != "win32":
-        return
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        # 控制台事件：0=CTRL_C 1=CTRL_BREAK 2=CTRL_CLOSE 5=LOGOFF 6=SHUTDOWN
-        handler_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
-
-        def _on_console_event(event: int) -> bool:
-            # 此回调运行在系统新建的线程里，不能使用 Playwright
-            if event in (2, 5, 6):
-                _kill_browser_process()
-                return True
-            return False
-
-        _console_handler = handler_type(_on_console_event)
-        ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler, True)
-    except Exception:
-        pass
+# 抢购脚本不启动也不关闭浏览器：浏览器由 launch_browser.py 手动启动并长期常驻，
+# 这里只负责连接，退出时仅断开 CDP 连接（见 CdpSession.close）。
 
 
 class CdpSession:
@@ -276,44 +185,44 @@ class CdpSession:
     Chrome 退出、连接断开），到点就只剩一次必然失败的调用，整轮抢购直接报废。
     因此把「连接 + 页面」包成可重建的会话：`probe` 探活，`recover` 重建。
 
+    浏览器由用户手动启动（`launch_browser.py`）并长期常驻：本类只连接、只重开
+    活动页，从不启动也从不关闭浏览器。窗口关掉后 Chrome 进程仍留在后台，
+    调试端口一直可用，所以定时任务任何时候执行都能连上。
+
+    窗口关掉后浏览器里一个页面也没有，而兑换请求必须跑在页面里（要读页面数据
+    `window.__react_data__`、调 `window.getJsToken()`），因此这种时候会新建一个
+    页面；本次运行新建的页面会在 `close()` 时关掉，跑完即恢复「无窗口」原状。
+
     复用 Chrome 的默认 context（含用户登录态），从而在「受信任会话」里执行抢购，
     京东才会渲染「立即免费兑换」按钮；登录态保存在 --user-data-dir 中，可跨次复用。
     """
 
-    def __init__(self, cdp_url: str, port: int, profile: str, url: str,
-                 chrome_path: str | None = None):
+    def __init__(self, cdp_url: str, url: str):
         self.cdp_url = cdp_url
-        self.port = port
-        self.profile = profile
-        self.url = url              # 启动 Chrome 时打开的地址（默认活动页）
-        self.chrome_path = chrome_path
+        self.url = url              # 活动页地址；页面丢失后按它重开
         self.page = None            # 活动页；丢失后由 recover 重建
         self.context = None
         self.browser = None
+        self.created_page = False   # 当前页面是否由本次运行新建（关掉它才算恢复原状）
         self.recoveries = 0         # 累计恢复次数，仅用于日志
-        self._pw = None             # Playwright 实例（每次重建都换一个）
+        self._pw = None             # Playwright 实例（每次重连都换一个）
 
     # ---- 连接与页面 ----
 
     def connect(self) -> None:
-        """连上带调试端口的 Chrome；端口不通就重新拉起一个。
+        """连上已在运行的 Chrome（调试端口必须已就绪）。
 
-        端口还在就直接复用（例如上次异常退出残留的 Chrome 也能接着用），
-        避免「一次异常退出之后此后再也起不来」。
+        不再自己启动 Chrome：浏览器由 `launch_browser.py` 手动启动并长期常驻。
+        连不上就说明浏览器没在跑，报错让人去处理——而不是悄悄拉起一个新实例：
+        新实例会另开一份用户数据目录，和用户手动开的那个不是同一个会话，
+        登录态与页面都对不上。
         """
-        global _browser
         if not cdp_reachable(self.cdp_url):
-            if not launch_chrome(self.port, self.profile, self.url, self.chrome_path):
-                raise RuntimeError("启动 Chrome 失败")
-            if not wait_for_cdp(self.cdp_url, CDP_WAIT_MS):
-                raise RuntimeError(
-                    f"等待 {self.cdp_url} 就绪超时：Chrome 没起来，或用户数据"
-                    f"目录已被残留进程占用（{self.profile}）")
+            raise RuntimeError(
+                f"连不上 {self.cdp_url}：浏览器没在运行，或调试端口不是这个。"
+                "请先执行 `python launch_browser.py` 启动浏览器并完成登录。")
         self._pw = sync_playwright().start()
         browser = self._pw.chromium.connect_over_cdp(self.cdp_url)
-        _browser = browser          # 供退出时统一关闭
-        _remember_browser_pid(browser)
-        _install_console_close_handler()
         self.browser = browser
         self.context = browser.contexts[0] if browser.contexts else browser.new_context()
 
@@ -327,13 +236,51 @@ class CdpSession:
         return page
 
     def _pick_page(self, url: str):
-        """优先复用已在活动页的标签页，其次复用任意标签页，最后新建。"""
+        """优先复用已在活动页的标签页，其次复用任意标签页，最后新建一个。"""
         base = url.split("?")[0]
         pages = [p for p in (self.context.pages or []) if not p.is_closed()]
         for page in reversed(pages):
             if page.url.split("?")[0] == base:
                 return page
-        return pages[-1] if pages else self.context.new_page()
+        if pages:
+            return pages[-1]
+        # 窗口已经关了（浏览器进程还在、CDP 可用，但一个页面都没有）：请求必须发在
+        # 页面里，所以只能新建一个。记下来，结束时把它关掉，恢复「无窗口」原状。
+        log("浏览器里没有可用页面（窗口已关闭）：新建一个标签页。")
+        self.created_page = True
+        return self.context.new_page()
+
+    def minimize_window(self) -> bool:
+        """把当前页面所在窗口最小化（抢购期间不占用桌面），成功返回 True。
+
+        只有 `grab --minimize-page` 时才用：窗口关着时新建的临时页面本来是可见的，
+        最小化后不遮挡桌面也不抢焦点，跑完临时页面照样会被关掉。
+        实测（Windows，最小化 11 分钟）：页面一直是 `visibilityState=visible`、
+        `wasDiscarded=false`，`evaluate` 与探活全部正常；macOS 锁屏属同类场景
+        （窗口没关、标签页仍是活动标签）但未实测。
+        """
+        page = self.page
+        if page is None or page.is_closed() or self.browser is None:
+            return False
+        try:
+            sess = self.browser.new_browser_cdp_session()
+            base = page.url.split("?")[0]
+            target_id = None
+            for info in sess.send("Target.getTargets").get("targetInfos", []):
+                if info.get("type") == "page" \
+                        and info.get("url", "").split("?")[0] == base:
+                    target_id = info["targetId"]
+                    break
+            if target_id is None:
+                return False
+            window_id = sess.send("Browser.getWindowForTarget",
+                                  {"targetId": target_id})["windowId"]
+            sess.send("Browser.setWindowBounds", {
+                "windowId": window_id, "bounds": {"windowState": "minimized"}})
+            return True
+        except Exception as exc:
+            log(f"最小化窗口失败（不影响抢购）: {exc}")
+            return False
 
     def probe(self, timeout_ms: int = 4000) -> bool:
         """探活：连接在、页面还能在 timeout_ms 内响应；超时按「已丢失」处理。
@@ -354,9 +301,10 @@ class CdpSession:
     def recover(self, url: str | None = None) -> bool:
         """页面/连接丢失后就地重建会话，成功返回 True。
 
-        先断开再重连同一个调试端口：页面被关掉时浏览器通常还活着（macOS 上关掉
-        最后一个窗口 Chrome 进程仍在），只有端口也不通时才重新拉起 Chrome。
-        断开不会关闭 Chrome，所以恢复不会「顺手」把浏览器一起干掉。
+        先断开再重连同一个调试端口：页面被关掉时浏览器还活着（窗口关掉后
+        Chrome 进程仍留在后台），重开活动页即可。端口也不通说明浏览器整个退出
+        了：本轮恢复不了——脚本不会自己启动浏览器，请手动
+        `python launch_browser.py`。断开不会关闭 Chrome。
         """
         url = url or self.url
         self.recoveries += 1
@@ -374,11 +322,10 @@ class CdpSession:
 
     def _disconnect(self) -> None:
         """断开当前 CDP 连接（不关闭 Chrome）并清空引用。"""
-        global _browser
         self.page = None
         self.context = None
         self.browser = None
-        _browser = None             # 旧连接不再参与退出时的关闭
+        self.created_page = False
         pw, self._pw = self._pw, None
         if pw is not None:
             try:
@@ -386,28 +333,55 @@ class CdpSession:
             except Exception:
                 pass
 
-    def close(self) -> None:
-        """结束本次运行：关闭 Chrome 窗口（含兜底强杀）并停掉 Playwright。"""
-        global _browser
-        _browser = self.browser
-        try:
-            _close_browser()
-            _kill_browser_process()  # 优雅关闭失败时的兜底
-        finally:
-            self.page = None
-            self.context = None
-            self.browser = None
-            pw, self._pw = self._pw, None
-            if pw is not None:
-                try:
-                    pw.stop()
-                except Exception:
-                    pass
+    def close(self, keep_page: bool = False) -> None:
+        """结束本次运行：关掉本次新建的页面（若没有），然后断开调试连接。
+
+        绝不能顺手关掉浏览器：它由用户手动启动、跨定时任务长期常驻，
+        「CDP 随时可连接」正是靠它一直活着；关窗口/退出的主动权在用户手里。
+
+        本次运行新建的页面要一并关掉：窗口已关（无页面）时新建的页面用完就该
+        还回去，让机器回到「无窗口、后台进程仍在」的状态。`keep_page=True` 时
+        保留它（`launch_browser.py` 要把页面留给用户登录）。
+        """
+        page = self.page
+        if self.created_page and not keep_page and page is not None \
+                and not page.is_closed():
+            try:
+                page.close()        # 关掉最后一个标签页只会关窗口，Chrome 进程仍在
+                log("已关闭本次抢购新建的页面（Chrome 进程继续在后台运行）。")
+            except Exception:
+                pass
+        self._disconnect()
 
 
 def is_login_page(page) -> bool:
     """判断当前是否停留在京东登录页。"""
     return "plogin.m.jd.com" in page.url
+
+
+def wait_for_login(page, timeout_s: int = 300, poll_ms: int = 3000) -> bool:
+    """等用户在浏览器窗口中完成登录；登录完成返回 True，超时返回 False。
+
+    与 `ensure_logged_in` 的分工：那个用于无人值守的抢购（靠终端回车推进、超时
+    就放弃），这个用于 `launch_browser.py` 这类「用户就在旁边操作」的场景——
+    不要求终端输入，也不主动重开页面，只是盯着页面看它是否还停在登录页。
+    """
+    if not is_login_page(page):
+        log("登录态正常：没有跳到登录页。")
+        return True
+    log(f"检测到未登录：页面已跳到登录页（{page.url}）。")
+    log(f"请在浏览器窗口中完成京东登录，登录完成后脚本会自动继续（最多等 {timeout_s}s）...")
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        time.sleep(poll_ms / 1000)
+        if page.is_closed():
+            log("等待期间页面/窗口被关闭，停止等待。")
+            return False
+        if not is_login_page(page):
+            log(f"登录成功（{page.url}），登录态已保存在用户数据目录里。")
+            return True
+    log(f"等待 {timeout_s}s 后仍停留在登录页，本次未完成登录。")
+    return False
 
 
 def ensure_logged_in(page, url: str, max_tries: int = 5) -> bool:

@@ -1,4 +1,4 @@
-"""京东「免费小保养」抢购模块（项目唯一入口，含启动 Chrome）。
+"""京东「免费小保养」抢购模块（定时任务入口，连接手动启动的常驻 Chrome）。
 
 10:00:00 放库存，脚本等到该时刻就在活动页内调用兑换接口
 `bff_rights_points_exchange`：头 BURST_MS 毫秒（默认 2s）按 BURST_INTERVAL_MS
@@ -15,9 +15,14 @@
 脚本会等到放库存时刻（10:00:00）；若启动时已过该时刻，则不再等待、立即开始，
 因此盘中手动补跑或试跑都是直接发请求。
 
-浏览器：默认自动启动带调试端口的真实 Chrome（脚本自己启动、结束时关闭），并直接
-打开活动页——活动数据会随页面一起开始加载。只有检测到未登录（页面被跳到登录页）时
-才在该登录页手动完成登录；「受信任会话」下页面才会返回该商品完整的兑换参数。
+浏览器：脚本不启动也不关闭浏览器——浏览器由 `python launch_browser.py` 手动启动
+并长期常驻（窗口关掉后 Chrome 进程仍留在后台，调试端口一直可用），本脚本只连上去
+并打开活动页——活动数据会随页面一起开始加载。只有检测到未登录（页面被跳到登录页）
+时才在该登录页手动完成登录；「受信任会话」下页面才会返回该商品完整的兑换参数。
+连不上调试端口（浏览器没在运行）会记日志并以退出码 1 结束，不会自行拉起浏览器，
+也不会在跑完后把浏览器关掉——定时任务因此可以随时执行。窗口已经被用户关掉
+（浏览器里没有任何页面）时会临时新建一个标签页：兑换请求必须发在页面里，抢完这个
+临时页面会自动关掉，浏览器回到「无窗口、后台进程仍在」的样子。
 
 页面会丢，但抢购不能因此报废：从打开页面到 10:00:00 之间隔着十几分钟，期间活动页
 可能被关掉、调试连接可能断开、Chrome 也可能整个退出（macOS 上关掉最后一个窗口时
@@ -56,9 +61,8 @@ KEEPALIVE_MS = 20000           # 每隔多久探活一次（顺带给 CDP 连接
 KEEPALIVE_TIMEOUT_MS = 4000    # 单次探活超时；超时即认为页面/连接已丢失
 KEEPALIVE_QUIET_S = 5          # 距开抢不足这么久就停止探活，专心精确等待
 
-# ---- 启动 Chrome 参数 ----
-DEFAULT_PORT = 9222            # 调试端口
-DEFAULT_PROFILE = "./jd_cdp_profile"  # 用户数据目录（登录态保存在这里）
+# ---- 连接 Chrome 参数 ----
+DEFAULT_PORT = 9222            # 已运行 Chrome 的调试端口（launch_browser.py 同值）
 # 调试端口就绪 / 页面加载的超时见 src/browser.py（CDP_WAIT_MS / PAGE_LOAD_TIMEOUT_MS）
 
 
@@ -187,7 +191,8 @@ def wait_until_active(session, target: datetime, url: str) -> bool:
             return False
 
 
-def run_grab(session, start_time: datetime, test: bool) -> int:
+def run_grab(session, start_time: datetime, test: bool,
+             minimize_page: bool = False) -> int:
     """到开抢时刻直调兑换接口抢购，返回退出码。"""
     url = config.ACTIVITY_URL
     log("打开活动页...")
@@ -198,6 +203,11 @@ def run_grab(session, start_time: datetime, test: bool) -> int:
         return 1
     if not ensure_logged_in(session.page, url):
         return 1
+
+    # 可选：窗口关着时新建的临时页面本来是可见的，最小化后不遮挡桌面（不影响执行，
+    # 实测最小化 11 分钟页面仍 visibilityState=visible、evaluate/探活正常）
+    if minimize_page and session.minimize_window():
+        log("已最小化窗口（--minimize-page）：抢购期间不占用桌面。")
 
     # 兑换参数是页面打开后异步加载的：先等到能读到再等到点，避免到点了才发现
     # 取不到参数。已抢完的商品同样能读到完整参数，因此不用等补库存。
@@ -238,18 +248,16 @@ def run_grab(session, start_time: datetime, test: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="京东免费小保养自动抢购（必要时自动启动带调试端口的 Chrome）")
+        description="京东免费小保养自动抢购（连接 launch_browser.py 启动的常驻 Chrome）")
     parser.add_argument("--start", help="放库存时间，格式 HH:MM:SS，默认 10:00:00"
                                        "（到点即开抢，不提前）")
     parser.add_argument("--test", action="store_true", help="立即开始（测试模式）")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"启动/连接的 Chrome 调试端口，默认 {DEFAULT_PORT}")
-    parser.add_argument("--profile", default=DEFAULT_PROFILE,
-                        help=f"Chrome 用户数据目录，默认 {DEFAULT_PROFILE}")
-    parser.add_argument("--url", default=config.ACTIVITY_URL,
-                        help="启动 Chrome 时打开的地址，默认活动页"
-                             "（未登录时京东会自动跳到登录页）")
-    parser.add_argument("--chrome", help="Chrome/Edge 可执行文件路径，默认自动查找")
+                        help=f"已运行 Chrome 的调试端口，默认 {DEFAULT_PORT}"
+                             "（与 launch_browser.py 一致）")
+    parser.add_argument("--minimize-page", action="store_true",
+                        help="窗口关着时，把新建的临时页面所在窗口自动最小化"
+                             "（不遮挡桌面；默认关闭）")
     args = parser.parse_args()
 
     cdp_url = f"http://localhost:{args.port}"
@@ -263,15 +271,15 @@ def main() -> int:
         f"test={args.test} attempts={API_ATTEMPTS} "
         f"burst={BURST_MS / 1000:g}s/{BURST_INTERVAL_MS}ms cdp={cdp_url}")
 
-    # 会话自己负责：拉起/复用带调试端口的 Chrome、打开活动页、丢失后重建
-    session = CdpSession(cdp_url, args.port, args.profile, args.url, args.chrome)
+    # 会话自己负责：连接已运行的 Chrome、打开活动页、页面/连接丢失后重建
+    session = CdpSession(cdp_url, config.ACTIVITY_URL)
 
     code = 1
     try:
         session.connect()
         log(f"已连接到已登录的真实浏览器（CDP: {cdp_url}）。"
             "若需登录，请在浏览器窗口中完成。")
-        code = run_grab(session, start_time, args.test)
+        code = run_grab(session, start_time, args.test, args.minimize_page)
     except KeyboardInterrupt:
         log("运行被中断（Ctrl+C）。")
         code = 130
@@ -280,7 +288,7 @@ def main() -> int:
         log("运行异常终止:\n" + traceback.format_exc().rstrip())
         code = 1
     finally:
-        session.close()  # 正常结束、异常、中断都要收掉 Chrome 窗口
+        session.close()  # 正常结束、异常、中断都只断开调试连接，浏览器继续在后台运行
 
     log(f"运行结束: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 退出码 {code}")
     return code

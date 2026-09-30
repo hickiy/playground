@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- LaunchAgent 模板：由 install.sh 把 __PROJECT_DIR__ 替换成实际路径后装到
-     ~/Library/LaunchAgents/。必须装在用户会话（gui/<uid>）里：脚本要启动真实
-     Chrome 窗口，daemon 会话下起不来。 -->
+     ~/Library/LaunchAgents/。必须装在用户会话（gui/<uid>）里：任务要连接用户
+     手动启动的真实 Chrome、并持有 caffeinate 防睡眠，daemon 会话下都不行。 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -27,9 +27,8 @@
     <string>Interactive</string>
 
     <!-- 显式保持默认值 false：任务结束（含异常/被终止）时由 launchd 清掉同组的残留
-         进程——主要是脚本启动的 Chrome。残留的 Chrome 会一直占着 --user-data-dir，
-         下次启动时新进程把命令行交给它后自己退出，调试端口起不来，抢购必然失败。
-         脚本自己会优雅关闭 Chrome，这里只是兜底。 -->
+         进程（caffeinate 等）。浏览器不在此列——它由用户手动启动并长期常驻，
+         脚本只连接它，不属于本任务的进程组，不会被这里清掉。 -->
     <key>AbandonProcessGroup</key>
     <false/>
 
