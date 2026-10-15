@@ -29,6 +29,7 @@ import argparse
 import sys
 import time
 import traceback
+from pathlib import Path
 
 from . import browser, config, downloader
 from .browser import log
@@ -76,8 +77,13 @@ def _poll_key() -> str:
         return ""
 
 
-def download_once(context, url: str, title: str, args) -> bool:
-    """下载当前标签页指向的视频，返回是否成功。"""
+def download_once(context, url: str, title: str, args) -> Path | None:
+    """下载 ``url`` 指向的视频，返回落盘路径；失败返回 None。
+
+    返回路径而不是布尔值，是为了让 ``src.job`` 这种编排入口能拿着同一条路径
+    接着做发布（成功时返回 Path，恒为真；失败返回 None）——监听循环里只判真假，
+    行为不变。
+    """
     log(f"开始下载：{title or url}")
     if not config.is_video_page(url, args.platform):
         log("  该 URL 不在已识别的视频页规则内，仍然交给 yt-dlp 尝试。")
@@ -103,9 +109,9 @@ def download_once(context, url: str, title: str, args) -> bool:
                 pass
 
     if path is None:
-        return False
+        return None
     log(f"已保存：{path}")
-    return True
+    return path
 
 
 def _auto_step(context, args, page, pending: tuple | None, done: set) -> tuple | None:

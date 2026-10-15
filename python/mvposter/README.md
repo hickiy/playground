@@ -226,6 +226,59 @@ python -m src.cli mark nRDysNZdMvU published --post-id 123456    # 拿到视频�
 - 检索参数（排序 `sp`、时长/播放量阈值、每关键词条数）见 `src/discover.py` 顶部常量，
   也都能用命令行覆盖。
 
+## 无人值守：每天凌晨 03:00 跑一轮（检索 → 下载 → 发布）
+
+上面那些子命令是**手工**用的。要让它自己每天跑一轮，用 `src.job`——把四个环节串成一次
+运行（检索 → 按播放速度挑前 N 条 → 下载 → 发布）：
+
+```bash
+python -m src.job                     # 一轮 1 条：检索 → 挑选 → 下载 → 发布（默认填完即提交）
+python -m src.job --dry-run           # 只检索 + 挑选并打印计划，不下载、不发布（试跑用）
+python -m src.job --count 2           # 一轮 2 条（两条之间按 --interval 抖动间隔）
+python -m src.job --no-publish        # 半自动：只填表 + 截图，停在「发表」按钮前
+python -m src.job --focus 猫 --count 1
+```
+
+**挑选是确定性的**（按检索打分取前 N），不依赖模型或 API Key ——凌晨没人看着，空跑一次
+比乱发一条便宜。想人工挑片就用 `src.cli` 那套（`discover` → `mark picked` → `publish`）。
+
+再把它挂到 macOS 的 LaunchAgent 上（照搬相邻项目 `jd_car_maintain_grab` 的做法）：
+
+```bash
+./deploy/macos/install.sh                        # 渲染 plist、加载每天 03:00 的 LaunchAgent
+
+cd ../browserhost && python main.py start        # 常驻 Chrome 必须先起好、两个站点仍是登录态
+
+sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00 # 定时唤醒（launchd 不会唤醒睡着的 Mac）
+pmset -g sched                                   # 确认时间表
+```
+
+两个开关**不改代码**就能调（`run_job.sh` 里的默认值，或给 plist 加 `EnvironmentVariables`）：
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `MVPOSTER_COUNT` | `1` | 每轮处理几条 |
+| `MVPOSTER_PUBLISH_MODE` | `--publish` | `--publish` 填完即自动提交；`--no-publish` 只填表等人点发表 |
+
+```bash
+./deploy/macos/run_job.sh --dry-run                          # 不动线上，只看今天会挑哪条
+launchctl kickstart -k gui/$(id -u)/com.mvposter.job         # 按定时任务的方式完整跑一轮
+tail -f logs/mvposter_$(date +%F).log                        # 看这一轮干了什么
+```
+
+细节（时间线、验证、退出码、卸载、注意事项）见 **`deploy/macos/README.md`**。三条要点：
+
+- **登录态会过期**：失效时本轮记 `need_login`、**不改状态机**、保留页签供扫码，一条都不发；
+- **机器得醒着**：`launchd` 不会唤醒睡眠中的 Mac，要 `pmset` 唤醒，还得**不合盖 + 接电源**；
+- **默认是「填完即提交」**：想留一道人工闸门，就把 `MVPOSTER_PUBLISH_MODE` 设成 `--no-publish`。
+
+前置条件还有一条容易踩的（`--dry-run` 会替你先查）：**那只 Chrome 自己必须能打开
+`youtube.com` 并且真的登录过 YouTube**。yt-dlp 靠 `LOGIN_INFO` 这个 cookie 判断登录态，
+只有 Google 的 SSO cookie（`SID` / `HSID` …）而没有它时，YouTube 会回
+`Sign in to confirm you're not a bot`，下载必然失败。补救：让那只 Chrome 能正常访问
+youtube.com 后，在登录状态下访问一次 youtube.com 让 `LOGIN_INFO` 落地——浏览器的代理
+由 browserhost 决定，本项目不碰。
+
 ## 目录结构
 
 ```text
@@ -244,7 +297,10 @@ mvposter/
 │   ├── store.py        # SQLite：去重、状态机、与 movies/ 对账
 │   ├── publish.py      # 视频号发布（CDP 新开自己的页签，默认填完即自动提交）
 │   ├── cli.py          # 流水线入口：keywords / discover / list / backfill / mark / publish
+│   ├── job.py          # 无人值守的一轮完整任务：检索 → 挑选 → 下载 → 发布
 │   └── main.py         # 下载入口：监听当前标签页 / --auto / --download
+├── deploy/
+│   └── macos/          # LaunchAgent：每天 03:00 跑一轮 src.job（install.sh / run_job.sh / plist）
 ├── movies/             # 下载产物（运行时生成，按日期分目录）
 └── logs/               # 按天分的执行日志与发布截图（运行时生成）
 ```
