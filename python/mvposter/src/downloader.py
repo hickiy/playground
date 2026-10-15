@@ -1,8 +1,8 @@
 """用 yt-dlp 下载视频：产物落在 movies/<日期>/，代理默认走本机 127.0.0.1:1080。
 
-yt-dlp 以库的形式调用（不依赖外部 yt-dlp 可执行文件）；ffmpeg 用它合并分轨格式，
-只用系统里那份（PATH，或 Homebrew / winget 的目录），项目内不放副本——程序启动时
-会检查有没有，缺了就提示安装指引并退出（见 src/main.py 的 require_ffmpeg）。
+yt-dlp 以库的形式调用（不依赖外部 yt-dlp 可执行文件）。ffmpeg 是**系统里的外部工具**：
+本程序不安装、不代管、也不检查它，只在 PATH（以及 Homebrew / winget 的目录）里找一下，
+找到就把位置告诉 yt-dlp（见 find_ffmpeg）；找不到也不拦着，yt-dlp 自己会去 PATH 找。
 代理的取值顺序是「环境变量 > config.json > 内置默认」，细节见下面的 proxy 一节。
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 import yt_dlp
 
 from . import config
-from .browser import log
+from .logging import log
 
 # --quality 允许的档位；best 表示不限高度
 QUALITIES = ("1080", "720", "480", "360", "best")
@@ -163,26 +163,12 @@ def which_binary(name: str) -> str | None:
 
 
 def find_ffmpeg() -> str | None:
-    """找 ffmpeg：只用系统里那份（PATH，或 Homebrew / winget 的目录）。
+    """在 PATH（以及 Homebrew / winget 的目录）里找系统那份 ffmpeg；找不到返回 None。
 
-    程序不代装 ffmpeg、项目内也不放副本；找不到时由 src/main.py 提示安装并退出。
+    找到不是必须的：yt-dlp 自己也会去 PATH 里找。这里找到就显式把位置告诉它，
+    免得「刚用 winget 装完、但 shim 目录还没进 PATH」的进程找不到。
     """
     return which_binary("ffmpeg")
-
-
-# 没装 ffmpeg 时的安装指引（按平台给一句能直接照做的话）
-FFMPEG_HINTS = {
-    "win32": "winget install Gyan.FFmpeg（或从 https://www.gyan.dev/ffmpeg/builds/ 下 zip，"
-             "把里面的 bin 目录加进 PATH）",
-    "darwin": "brew install ffmpeg（还没装 Homebrew 就先跑 https://brew.sh 上的那行命令）",
-}
-
-
-def ffmpeg_hint() -> str:
-    """本平台的 ffmpeg 安装指引（日志里直接用）。"""
-    return FFMPEG_HINTS.get(
-        sys.platform, "apt install ffmpeg（Debian/Ubuntu）/ dnf install ffmpeg / "
-                      "pacman -S ffmpeg，按你的发行版选")
 
 
 def find_js_runtime() -> str | None:
@@ -246,7 +232,7 @@ def download(url: str, quality: str = "1080", proxy: str | None = None,
              cookies_file: Path | None = None) -> Path | None:
     """下载单个视频到 movies/<当天>/，返回最终文件路径；失败返回 None。"""
     out_dir = day_dir()
-    # 启动时已经确认过 ffmpeg 存在（见 src/main.py 的 require_ffmpeg）
+    # 系统里找得到 ffmpeg 就把位置交给 yt-dlp（找不到也不拦：它自己会去 PATH 找）
     ffmpeg = find_ffmpeg()
     options = {
         "paths": {"home": str(out_dir)},

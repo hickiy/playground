@@ -1,4 +1,4 @@
-"""京东「免费小保养」抢购模块（定时任务入口，连接手动启动的常驻 Chrome）。
+"""京东「免费小保养」抢购模块（定时任务入口，连接 browserhost 的常驻 Chrome）。
 
 10:00:00 放库存，脚本等到该时刻就在活动页内调用兑换接口
 `bff_rights_points_exchange`：头 BURST_MS 毫秒（默认 2s）按 BURST_INTERVAL_MS
@@ -15,7 +15,7 @@
 脚本会等到放库存时刻（10:00:00）；若启动时已过该时刻，则不再等待、立即开始，
 因此盘中手动补跑或试跑都是直接发请求。
 
-浏览器：脚本不启动也不关闭浏览器——浏览器由 `python launch_browser.py` 手动启动
+浏览器：脚本不启动也不关闭浏览器——常驻 Chrome 由 browserhost 启动（见 ../browserhost）
 并长期常驻（窗口关掉后 Chrome 进程仍留在后台，调试端口一直可用），本脚本只连上去
 并打开活动页——活动数据会随页面一起开始加载。只有检测到未登录（页面被跳到登录页）
 时才在该登录页手动完成登录；「受信任会话」下页面才会返回该商品完整的兑换参数。
@@ -62,8 +62,8 @@ KEEPALIVE_TIMEOUT_MS = 4000    # 单次探活超时；超时即认为页面/连�
 KEEPALIVE_QUIET_S = 5          # 距开抢不足这么久就停止探活，专心精确等待
 
 # ---- 连接 Chrome 参数 ----
-DEFAULT_PORT = 9222            # 已运行 Chrome 的调试端口（launch_browser.py 同值）
-# 调试端口就绪 / 页面加载的超时见 src/browser.py（CDP_WAIT_MS / PAGE_LOAD_TIMEOUT_MS）
+DEFAULT_PORT = 9222            # Chrome 调试端口（browserhost 实例的端口）
+# 页面加载的超时见 src/browser.py（PAGE_LOAD_TIMEOUT_MS）
 
 
 def resolve_start(start_str: str | None) -> datetime:
@@ -248,13 +248,13 @@ def run_grab(session, start_time: datetime, test: bool,
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="京东免费小保养自动抢购（连接 launch_browser.py 启动的常驻 Chrome）")
+        description="京东免费小保养自动抢购（连接 browserhost 的常驻 Chrome 实例）")
     parser.add_argument("--start", help="放库存时间，格式 HH:MM:SS，默认 10:00:00"
                                        "（到点即开抢，不提前）")
     parser.add_argument("--test", action="store_true", help="立即开始（测试模式）")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"已运行 Chrome 的调试端口，默认 {DEFAULT_PORT}"
-                             "（与 launch_browser.py 一致）")
+                        help=f"Chrome 调试端口，默认 {DEFAULT_PORT}"
+                             "（与 browserhost 实例一致）")
     parser.add_argument("--minimize-page", action="store_true",
                         help="窗口关着时，把新建的临时页面所在窗口自动最小化"
                              "（不遮挡桌面；默认关闭）")

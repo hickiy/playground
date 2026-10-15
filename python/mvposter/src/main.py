@@ -1,11 +1,13 @@
-"""MVPoster —— 真实 Chrome（CDP）+ yt-dlp 的视频下载器（唯一入口）。
+"""MVPoster —— 通过 CDP 借常驻 Chrome 的登录态，用 yt-dlp 下载视频（下载入口）。
 
-不构建任何客户端界面：浏览器就是系统里的 Chrome，登录和「要下哪条视频」都在
-Chrome 里完成；本程序只做三件事——
+**浏览器不归本程序管**：真实 Chrome（含登录态、用户数据目录）由独立项目
+browserhost 常驻提供，先 `cd ../browserhost && python main.py start` 起一次即可，
+之后窗口随手关掉都行。本程序只连接它的调试端口（连不上就提示怎么启动，绝不自己
+拉一个浏览器），然后做三件事——
 
-  1. 拉起（或复用）带调试端口的真实 Chrome，登录态存在 --profile 目录里；
-  2. 通过 CDP 盯着「用户当前激活的那个标签页」，把标题 / URL 打到终端；
-  3. 用户按下回车时，从 Chrome 导出 cookies 交给 yt-dlp，下载到 movies/<日期>/。
+  1. 通过 CDP 盯着「用户当前激活的那个标签页」，把标题 / URL 打到终端；
+  2. 用户按下回车时，导出 Chrome 的 cookies 交给 yt-dlp（登录态只存在它的 profile）；
+  3. 下载到 movies/<当天日期>/。
 
 触发下载为什么不放在浏览器里：视频站点依赖真实登录态与风控环境，只有真实
 Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等于又做一个客户端）。
@@ -13,13 +15,14 @@ Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等�
 用户只是随手点开的页面。
 
 用法：
-    python -m src.main                 # 进入监听：在 Chrome 里选好视频，回终端按回车
+    python -m src.main                 # 进入监听：在浏览器里选好视频，回终端按回车
     python -m src.main --auto          # 切到视频页停留 3s 自动下载（同一 URL 只下一次）
     python -m src.main --download URL  # 直接下载该 URL 后退出
-    python -m src.main --platform tiktok --auto   # 只认 TikTok 的视频页，并打开 tiktok.com
+    python -m src.main --platform tiktok --auto   # 只认 TikTok 的视频页
 
-前置条件：系统里装有 ffmpeg（yt-dlp 合并分轨要用，程序不代装）——启动时检查，
-找不到就打印安装方式并以退出码 1 退出。
+前置条件：① browserhost 已在跑（`python main.py start`，调试端口 9222 可用）；
+② 系统里装有 ffmpeg（yt-dlp 合并分轨要用）——它是系统里的外部工具，本程序不安装、
+不代管、也不检查，缺了由 yt-dlp 自己报错。
 """
 
 import argparse
@@ -177,7 +180,8 @@ def watch(context, args) -> int:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="MVPoster：用真实 Chrome 选视频，yt-dlp 下载到 movies/<日期>/")
+        description="MVPoster：连 browserhost 常驻的 Chrome（CDP）挑视频，"
+                    "用 yt-dlp 下载到 movies/<日期>/")
     parser.add_argument("--auto", action="store_true",
                         help="自动模式：切到视频页停留 --auto-delay 秒后自动下载")
     parser.add_argument("--auto-delay", type=float, default=3.0,
@@ -189,38 +193,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--platform", choices=("auto", *config.PLATFORMS), default="auto",
                         help="只把指定站点的页面当视频页（"
                              + "/".join(config.PLATFORMS) + "；auto 表示所有站点，默认）")
-    parser.add_argument("--port", type=int, default=config.DEFAULT_PORT,
-                        help=f"Chrome 调试端口，默认 {config.DEFAULT_PORT}")
-    parser.add_argument("--profile", default=config.DEFAULT_PROFILE,
-                        help=f"Chrome 用户数据目录（登录态存这里），默认 {config.DEFAULT_PROFILE}")
-    parser.add_argument("--chrome", help="Chrome/Edge 可执行文件路径，默认自动查找")
-    parser.add_argument("--open", dest="open_url",
-                        help="启动 Chrome 时打开的地址，默认跟着 --platform 走"
-                             f"（未指定平台时是 {config.DEFAULT_OPEN_URL}）")
+    parser.add_argument("--port", type=int, default=config.CDP_PORT,
+                        help=f"browserhost 的调试端口，默认 {config.CDP_PORT}")
     args = parser.parse_args(argv)
     if args.platform == "auto":
         args.platform = None
-    if args.open_url is None:
-        # 没显式给 --open 就跟着平台走：选哪个平台就打开它的首页
-        args.open_url = (config.PLATFORMS[args.platform].home if args.platform
-                         else config.DEFAULT_OPEN_URL)
     return args
-
-
-def require_ffmpeg() -> bool:
-    """确认系统里装了 ffmpeg：装了返回 True，没装就打印安装指引并返回 False。
-
-    ffmpeg 由用户自己装（程序不代装、也不往项目里放副本）：yt-dlp 合并分轨、
-    探测可用格式都要用它，缺了就只能下低清晰度的合体格式，所以直接拦在启动阶段。
-    """
-    ffmpeg = downloader.find_ffmpeg()
-    if ffmpeg:
-        log(f"ffmpeg：{ffmpeg}")
-        return True
-    log("错误：系统里没有找到 ffmpeg（PATH 与 Homebrew / winget 的目录都没有）。")
-    log("  本程序用它合并视频与音频，请先装好再运行：")
-    log(f"  {downloader.ffmpeg_hint()}")
-    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -235,18 +213,18 @@ def main(argv: list[str] | None = None) -> int:
 
     proxy = downloader.resolve_proxy()
     log(f"代理：{downloader.mask_proxy(proxy) if proxy else '直连'}（{downloader.proxy_source()}）")
-    if not require_ffmpeg():
-        log("运行结束 | 退出码 1（缺 ffmpeg，未启动 Chrome）")
-        return 1
     if not downloader.find_js_runtime():
         log("提示：未找到 node，yt-dlp 解 YouTube 的 JS 挑战时会缺少部分格式。")
 
-    if not browser.ensure_cdp(args, proxy):
+    cdp_url = browser.cdp_url(args.port)
+    if not browser.ensure_available(cdp_url):
+        log("运行结束 | 退出码 1（连不上 CDP 服务）")
         return 1
+    log(f"已连上常驻 Chrome（{cdp_url}）：浏览器归 browserhost 管，退出时不会关闭它。")
 
     code = 1
     try:
-        with browser.cdp_browser(args.port) as context:
+        with browser.connect(cdp_url) as context:
             if args.download:
                 code = 0 if download_once(context, args.download, "", args) else 1
             else:

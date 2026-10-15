@@ -8,8 +8,8 @@
 # 开抢 → 跑满重试次数」整段，跑完自动释放。持续接电源时 -s 才有效，
 # 这正符合本目录的部署前提；-d 让显示屏也别睡，顺带避免 App Nap 节流 Chrome。
 #
-# 浏览器由用户手动启动并常驻（项目根目录的 python launch_browser.py），本脚本只
-# 连接它：连不上会记日志并以退出码 1 结束，不会自动拉起浏览器。
+# 浏览器由 browserhost 启动并常驻（见 ../browserhost 的 `python main.py start`），本脚本
+# 只连接它：连不上会记日志并以退出码 1 结束，不会自动拉起浏览器。
 set -eu
 
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -8,8 +8,9 @@ movies/
 logs/
 chrome_profile/
 
-# 旧版遗留：以前把 ffmpeg 下载到项目内（现在一律装在系统里），留着免得旧副本被误提交
-resources/bin/
+# 本地记录：候选池 / 去重库（data/mvposter.db）与临时产物
+data/
+.cache/
 
 # 编辑器 / 系统
 .vscode/

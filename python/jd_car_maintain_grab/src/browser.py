@@ -1,8 +1,16 @@
-"""共享的浏览器启动/连接、登录检测与日志工具。"""
+"""连接常驻 CDP 服务、登录检测与日志工具。
 
-import subprocess
+浏览器的生命周期与登录态都不在本项目里：CDP 服务由独立项目 **browserhost**（见
+`../browserhost`）提供——`python main.py start` 拉起一个真实 Chrome 并长期常驻，登录态
+在它自己的 profile 里持久化。所以本项目既不去找 Chrome 装在哪，也不碰 profile，只把调试
+端口当成一个服务连上去，并且只操作自己打开的那个标签页。
+
+于是这里只剩三件事：按天写日志、判断「页面 / 连接是否丢失」，以及一个**可重建**的会话
+（页面丢了就地重开，抢购不因一次丢失而报废）。浏览器窗口可以随手关——Chrome 进程仍留在
+后台、调试端口一直可用，本模块会自己补一个页面出来。
+"""
+
 import sys
-import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +31,6 @@ PAGE_LOST_HINTS = (
     "Connection closed",
 )
 
-CDP_WAIT_MS = 15000            # 等 Chrome 调试端口就绪的超时
 PAGE_LOAD_TIMEOUT_MS = 30000   # 页面加载（goto）超时
 
 
@@ -89,92 +96,18 @@ def log(msg: str) -> None:
     _write_log(f"[{now.strftime('%Y-%m-%d')} {stamp}] {msg}")
 
 
-# ---- 启动带调试端口的真实 Chrome ----
-
-def find_chrome() -> str | None:
-    """按平台常见安装位置查找 Chrome/Edge 可执行文件，找不到返回 None。"""
-    if sys.platform == "darwin":  # macOS
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ]
-    elif sys.platform == "win32":  # Windows
-        candidates = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ]
-    else:  # Linux / 其他类 Unix
-        candidates = [
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser",
-            "/usr/bin/microsoft-edge",
-        ]
-    for p in candidates:
-        if Path(p).exists():
-            return p
-    return None
-
-
 def cdp_reachable(cdp_url: str, timeout_s: float = 1.0) -> bool:
-    """探测该地址上是否已有可用的 CDP 调试端口。"""
+    """探测该地址上是否已有可用的 CDP 调试端口。
+
+    只为在连不上时给出人话提示（而不是让 Playwright 抛一段连接错误），不参与
+    任何生命周期管理：浏览器由 browserhost 启停。
+    """
     try:
         with urllib.request.urlopen(cdp_url.rstrip("/") + "/json/version",
                                     timeout=timeout_s) as resp:
             return resp.status == 200
     except Exception:
         return False
-
-
-def launch_chrome(port: int, profile: str, url: str,
-                  chrome_path: str | None = None) -> bool:
-    """启动带远程调试端口的真实 Chrome，返回是否成功拉起进程。
-
-    只由 `launch_browser.py`（手动启动）调用：抢购脚本不自己拉起浏览器，而是
-    连接这个常驻实例。用真实用户数据目录，登录态可跨次复用。
-
-    **不要**加 `--disable-background-mode`：带调试端口的 Chrome 默认启用后台
-    模式，窗口关掉后进程仍留驻、调试端口继续可用——这正是「CDP 随时可连接」
-    的前提。
-    """
-    chrome = chrome_path or find_chrome()
-    if not chrome:
-        log("未找到 Chrome/Edge，请用 --chrome 指定可执行文件路径。")
-        return False
-    profile_dir = Path(profile).resolve()
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    log(f"启动 Chrome: {chrome}（调试端口 {port}，用户数据目录 {profile_dir}）")
-    try:
-        subprocess.Popen([
-            chrome,
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile_dir}",
-            url,
-        ])
-    except Exception as exc:
-        log(f"启动 Chrome 失败: {exc}")
-        return False
-    return True
-
-
-def wait_for_cdp(cdp_url: str, timeout_ms: int = 15000) -> bool:
-    """等调试端口就绪——Chrome 从启动到监听端口会有延迟。"""
-    deadline = time.time() + timeout_ms / 1000
-    while True:
-        if cdp_reachable(cdp_url):
-            return True
-        if time.time() >= deadline:
-            return False
-        time.sleep(0.2)
-
-
-# 抢购脚本不启动也不关闭浏览器：浏览器由 launch_browser.py 手动启动并长期常驻，
-# 这里只负责连接，退出时仅断开 CDP 连接（见 CdpSession.close）。
 
 
 class CdpSession:
@@ -185,16 +118,16 @@ class CdpSession:
     Chrome 退出、连接断开），到点就只剩一次必然失败的调用，整轮抢购直接报废。
     因此把「连接 + 页面」包成可重建的会话：`probe` 探活，`recover` 重建。
 
-    浏览器由用户手动启动（`launch_browser.py`）并长期常驻：本类只连接、只重开
-    活动页，从不启动也从不关闭浏览器。窗口关掉后 Chrome 进程仍留在后台，
-    调试端口一直可用，所以定时任务任何时候执行都能连上。
+    只连接、只重开活动页，从不启动也从不关闭浏览器：实例由 browserhost 启停并长期
+    常驻（窗口关掉后 Chrome 进程仍留在后台，调试端口一直可用），所以定时任务任何
+    时候执行都能连上。
 
     窗口关掉后浏览器里一个页面也没有，而兑换请求必须跑在页面里（要读页面数据
     `window.__react_data__`、调 `window.getJsToken()`），因此这种时候会新建一个
     页面；本次运行新建的页面会在 `close()` 时关掉，跑完即恢复「无窗口」原状。
 
     复用 Chrome 的默认 context（含用户登录态），从而在「受信任会话」里执行抢购，
-    京东才会渲染「立即免费兑换」按钮；登录态保存在 --user-data-dir 中，可跨次复用。
+    京东才会渲染「立即免费兑换」按钮；登录态由 browserhost 的 profile 持久化。
     """
 
     def __init__(self, cdp_url: str, url: str):
@@ -210,17 +143,16 @@ class CdpSession:
     # ---- 连接与页面 ----
 
     def connect(self) -> None:
-        """连上已在运行的 Chrome（调试端口必须已就绪）。
+        """连上 browserhost 已在运行的那台 Chrome（调试端口必须已就绪）。
 
-        不再自己启动 Chrome：浏览器由 `launch_browser.py` 手动启动并长期常驻。
-        连不上就说明浏览器没在跑，报错让人去处理——而不是悄悄拉起一个新实例：
-        新实例会另开一份用户数据目录，和用户手动开的那个不是同一个会话，
-        登录态与页面都对不上。
+        不自己启动 Chrome：本项目不知道也不需要知道浏览器在哪、profile 在哪。
+        连不上就报错让人去处理——而不是悄悄拉起一个新实例：新实例会另开一份用户
+        数据目录，和常驻实例不是同一个会话，登录态与页面都对不上。
         """
         if not cdp_reachable(self.cdp_url):
             raise RuntimeError(
-                f"连不上 {self.cdp_url}：浏览器没在运行，或调试端口不是这个。"
-                "请先执行 `python launch_browser.py` 启动浏览器并完成登录。")
+                f"连不上 {self.cdp_url}：常驻 Chrome 没在运行，或调试端口不是这个。"
+                "请在 browserhost 里执行 `python main.py start`（幂等）后再试。")
         self._pw = sync_playwright().start()
         browser = self._pw.chromium.connect_over_cdp(self.cdp_url)
         self.browser = browser
@@ -302,9 +234,9 @@ class CdpSession:
         """页面/连接丢失后就地重建会话，成功返回 True。
 
         先断开再重连同一个调试端口：页面被关掉时浏览器还活着（窗口关掉后
-        Chrome 进程仍留在后台），重开活动页即可。端口也不通说明浏览器整个退出
-        了：本轮恢复不了——脚本不会自己启动浏览器，请手动
-        `python launch_browser.py`。断开不会关闭 Chrome。
+        Chrome 进程仍留在后台），重开活动页即可。端口也不通说明常驻实例整个退出了：
+        本轮恢复不了——本项目不会自己启动浏览器，请在 browserhost 里
+        `python main.py start`。断开不会关闭 Chrome。
         """
         url = url or self.url
         self.recoveries += 1
@@ -333,19 +265,17 @@ class CdpSession:
             except Exception:
                 pass
 
-    def close(self, keep_page: bool = False) -> None:
-        """结束本次运行：关掉本次新建的页面（若没有），然后断开调试连接。
+    def close(self) -> None:
+        """结束本次运行：关掉本次新建的页面（若有），然后断开调试连接。
 
-        绝不能顺手关掉浏览器：它由用户手动启动、跨定时任务长期常驻，
-        「CDP 随时可连接」正是靠它一直活着；关窗口/退出的主动权在用户手里。
+        绝不能顺手关掉浏览器：它是 browserhost 的常驻实例，被多个任务与多轮定时任务
+        共用，「CDP 随时可连接」正是靠它一直活着；关窗口/退出的主动权在用户手里。
 
-        本次运行新建的页面要一并关掉：窗口已关（无页面）时新建的页面用完就该
-        还回去，让机器回到「无窗口、后台进程仍在」的状态。`keep_page=True` 时
-        保留它（`launch_browser.py` 要把页面留给用户登录）。
+        本次运行新建的页面要一并关掉：窗口已关（无页面）时新建的页面用完就该还
+        回去，让机器回到「无窗口、后台进程仍在」的状态。
         """
         page = self.page
-        if self.created_page and not keep_page and page is not None \
-                and not page.is_closed():
+        if self.created_page and page is not None and not page.is_closed():
             try:
                 page.close()        # 关掉最后一个标签页只会关窗口，Chrome 进程仍在
                 log("已关闭本次抢购新建的页面（Chrome 进程继续在后台运行）。")
@@ -357,31 +287,6 @@ class CdpSession:
 def is_login_page(page) -> bool:
     """判断当前是否停留在京东登录页。"""
     return "plogin.m.jd.com" in page.url
-
-
-def wait_for_login(page, timeout_s: int = 300, poll_ms: int = 3000) -> bool:
-    """等用户在浏览器窗口中完成登录；登录完成返回 True，超时返回 False。
-
-    与 `ensure_logged_in` 的分工：那个用于无人值守的抢购（靠终端回车推进、超时
-    就放弃），这个用于 `launch_browser.py` 这类「用户就在旁边操作」的场景——
-    不要求终端输入，也不主动重开页面，只是盯着页面看它是否还停在登录页。
-    """
-    if not is_login_page(page):
-        log("登录态正常：没有跳到登录页。")
-        return True
-    log(f"检测到未登录：页面已跳到登录页（{page.url}）。")
-    log(f"请在浏览器窗口中完成京东登录，登录完成后脚本会自动继续（最多等 {timeout_s}s）...")
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        time.sleep(poll_ms / 1000)
-        if page.is_closed():
-            log("等待期间页面/窗口被关闭，停止等待。")
-            return False
-        if not is_login_page(page):
-            log(f"登录成功（{page.url}），登录态已保存在用户数据目录里。")
-            return True
-    log(f"等待 {timeout_s}s 后仍停留在登录页，本次未完成登录。")
-    return False
 
 
 def ensure_logged_in(page, url: str, max_tries: int = 5) -> bool:

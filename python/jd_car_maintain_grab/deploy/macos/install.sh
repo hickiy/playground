@@ -22,10 +22,9 @@ cat <<'EOF'
 
 安装完成。还需要三步才能真正按时抢到：
 
-1) 先手动启动一次常驻 Chrome（定时任务只连接它，不会自己启动浏览器）：
-     .venv/bin/python launch_browser.py
-   窗口关了也没关系，Chrome 进程会留在后台、调试端口一直可用。
-   检查端口：.venv/bin/python launch_browser.py --check
+1) 先启动常驻 Chrome 并在它的窗口里登录（定时任务只连接它，不会自己启动浏览器）：
+     在 browserhost 项目目录里执行：python main.py start
+   窗口关了也没关系（macOS 上 Chrome 进程会留在后台、调试端口一直可用）。
 
 2) 定时唤醒——launchd 不会唤醒睡眠中的 Mac，需要 sudo：
      sudo pmset repeat wakeorpoweron MTWRFSU 09:45:00

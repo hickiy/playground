@@ -1,4 +1,4 @@
-"""集中管理常量：目录、视频站点规则、Chrome/CDP 参数、代理与配置文件。"""
+"""集中管理常量：目录、视频站点规则、CDP 端口、代理与配置文件。"""
 
 import re
 from pathlib import Path
@@ -8,18 +8,18 @@ from typing import NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 MOVIES_DIR = ROOT / "movies"   # 下载产物：movies/<日期>/<标题>.<ext>
 LOG_DIR = ROOT / "logs"        # 按天分的执行日志
-# ffmpeg 不放在项目内，也不由本程序安装：要求用户装在系统里（PATH / Homebrew / winget），
-# 启动时检查不到就提示安装方式并退出
+DATA_DIR = ROOT / "data"       # 本地记录：候选池 / 去重 / 发布状态（见 src/store.py）
+DB_FILE = DATA_DIR / "mvposter.db"
+# ffmpeg 是系统里的外部工具（PATH / Homebrew / winget）：本程序不安装、不代管、也不检查，
+# 项目内也不放副本（原来那份 resources/bin 已删除）
 
-# ---- Chrome / CDP ----
-DEFAULT_PORT = 9222
-DEFAULT_PROFILE = "./chrome_profile"  # 用户数据目录：登录态保存在这里
-CDP_WAIT_MS = 15000   # 等调试端口就绪的超时
-POLL_MS = 300         # 主循环间隔：轮询按键，顺带刷新「当前激活标签页」
+# ---- CDP（浏览器由 browserhost 常驻提供，本项目只连接、不启动不关闭）----
+CDP_PORT = 9222   # browserhost 实例的调试端口（它自己的默认值也是 9222）
+POLL_MS = 300     # 主循环间隔：轮询按键，顺带刷新「当前激活标签页」
 
 # ---- 代理 ----
-# 默认走本机代理（Chrome 的登录过程和 yt-dlp 的下载都走它），想改就编辑项目根目录的
-# config.json，或用环境变量临时覆盖：
+# 只管 **yt-dlp 下载**用的代理（浏览器归 browserhost，它的代理由那个实例自己决定），
+# 想改就编辑项目根目录的 config.json，或用环境变量临时覆盖：
 #     环境变量（HTTPS_PROXY / HTTP_PROXY / ALL_PROXY） > config.json > DEFAULT_PROXY
 # 不提供 --proxy 开关：参数会进 shell 历史、进程列表和日志，不如放在文件和环境变量里。
 CONFIG_FILE = ROOT / "config.json"     # 用户可改的运行配置，见 README「代理与配置」
@@ -32,15 +32,14 @@ PROXY_ENV_VARS = (
 )
 
 # ---- 视频站点 ----
-# 加一个平台就加一条：关键字（--platform 用）-> 显示名 / 视频页正则 / 首页。
+# 加一个平台就加一条：关键字（--platform 用）-> 显示名 / 视频页正则。
 # 正则用来判断「当前标签页是不是视频页」：自动模式只对命中的页面自动下载，
 # 手动模式仅用它提示「这条像不像视频页」。
 class Platform(NamedTuple):
     """一个视频站点。"""
 
-    name: str                            # 日志里显示的名字
+    name: str                              # 日志里显示的名字
     patterns: tuple[re.Pattern[str], ...]  # 该站点的视频页 URL 规则
-    home: str                            # 首页：启动 Chrome 时默认打开的地址
 
 
 PLATFORMS: dict[str, Platform] = {
@@ -48,18 +47,13 @@ PLATFORMS: dict[str, Platform] = {
         "YouTube",
         (re.compile(r"^https?://(www\.|m\.)?youtube\.com/(watch\?|shorts/|live/)"),
          re.compile(r"^https?://youtu\.be/")),
-        "https://www.youtube.com",
     ),
     "tiktok": Platform(
         "TikTok",
         (re.compile(r"^https?://(www\.|m\.)?tiktok\.com/@[^/]+/(video|photo)/"),
          re.compile(r"^https?://(vm|vt)\.tiktok\.com/")),
-        "https://www.tiktok.com",
     ),
 }
-
-# 没指定 --platform 时启动 Chrome 打开的地址
-DEFAULT_OPEN_URL = PLATFORMS["youtube"].home
 
 
 def platform_of(url: str) -> str | None:

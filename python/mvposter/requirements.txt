@@ -1,4 +1,6 @@
 # 依赖列表（快速参考）
 # 正式安装用 uv sync（见 pyproject.toml）
+# 注意：浏览器不由本项目管理——常驻 Chrome 由相邻项目 browserhost 提供
+# （在 ../browserhost 里跑 python main.py start），本项目只通过 CDP 连它。
 playwright>=1.40
 yt-dlp[default]>=2024.1.1

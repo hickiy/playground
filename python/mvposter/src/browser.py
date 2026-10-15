@@ -1,208 +1,73 @@
-"""日志、启动/连接真实 Chrome、读取当前标签页、导出 cookies。
+"""连接 browserhost 常驻的 CDP 服务：本项目不启动、不关闭浏览器，也不管 profile。
 
-浏览器一定是**真实的 Chrome**（不是 Playwright 自带的 Chromium）：只有真实
-Chrome 的用户数据目录里才有用户的登录态，下载需要登录的视频才拿得到。
-Chrome 由本程序拉起，或复用已经开着调试端口的那个，统一通过 CDP 连接。
+浏览器（真实 Chrome + 登录态 + 用户数据目录）由独立项目 **browserhost** 常驻提供：
+在 `../browserhost` 里执行一次 `python main.py start`，之后调试端口一直可用，
+窗口随手关掉都行。本项目要做的只有三件事——
+
+  - 连上那个调试端口（连不上就给出启动提示并退出，绝不自己去拉一个浏览器）；
+  - 借它的 cookies 给 yt-dlp（登录态只存在它的 profile 里，本项目读不到）；
+  - 需要页面时**自己新开页签**，用完关掉自己的页签（见 `src/publish.py`）。
+
+多任务共用同一个实例时的纪律（见 browserhost/README.md）：只连接，不启动不关闭浏览器；
+只动自己开的页签；不发全局 CDP 命令（`Browser.close` / `Network.setCookie` / 改代理等）。
 """
 
+import json
 import os
-import subprocess
-import sys
 import tempfile
-import time
 import urllib.request
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from . import config
+from .logging import log
 
-# 防止打印含 ¥/emoji 等无法编码的页面标题时 UnicodeEncodeError 崩溃；
-# 保持终端原生编码（如 GBK），只把无法编码的字符替换掉。
-try:
-    sys.stdout.reconfigure(errors="replace")
-except Exception:
-    pass
-
-_log_fh = None    # 当天的日志文件句柄
-_log_date = None  # 句柄对应的日期，跨天自动换文件
+PROBE_TIMEOUT_S = 1.5        # 探测调试端口（L1：只看 /json/version），失败要快
+CONNECT_TIMEOUT_MS = 10_000  # connect_over_cdp 的握手超时
 
 
-def _write_log(line: str) -> None:
-    """按天追加写日志；写日志失败绝不能影响下载主流程。"""
-    global _log_fh, _log_date
-    today = datetime.now().strftime("%Y-%m-%d")
+def cdp_url(port: int) -> str:
+    """调试端口对应的 CDP 地址（browserhost 的实例按约定跑在本机回环上）。"""
+    return f"http://localhost:{port}"
+
+
+def ensure_available(url: str) -> bool:
+    """确认调试端口有人在听；连不上就打印「怎么把 browserhost 起起来」并返回 False。
+
+    只探 `/json/version`（HTTP 层），不起 Playwright：失败得快、也没有副作用。
+    「端口在、CDP 不响应」的僵死实例由 :func:`connect` 的握手超时兜住。
+    """
     try:
-        if _log_fh is None or _log_date != today:
-            if _log_fh is not None:
-                _log_fh.close()
-            config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-            _log_fh = (config.LOG_DIR / f"mvposter_{today}.log").open("a", encoding="utf-8")
-            _log_date = today
-        _log_fh.write(line + "\n")
-        _log_fh.flush()  # 随时可能被 Ctrl+C 打断，逐行落盘
+        with urllib.request.urlopen(url.rstrip("/") + "/json/version",
+                                    timeout=PROBE_TIMEOUT_S) as resp:
+            if resp.status == 200:
+                return isinstance(json.loads(resp.read().decode("utf-8", "replace")), dict)
     except Exception:
         pass
-
-
-def log(msg: str) -> None:
-    """输出日志：终端 + 当天日志文件。"""
-    now = datetime.now()
-    stamp = now.strftime("%H:%M:%S.%f")[:-3]
-    try:
-        print(f"[{stamp}] {msg}", flush=True)
-    except Exception:
-        pass
-    _write_log(f"[{now.strftime('%Y-%m-%d')} {stamp}] {msg}")
-
-
-_browser = None        # 当前 CDP 连接，退出时清理
-_we_launched = False   # Chrome 是否由本程序启动（复用别人的实例就不能关）
-
-
-# ---- 启动带调试端口的真实 Chrome ----
-
-def find_chrome() -> str | None:
-    """按平台常见安装位置查找 Chrome/Edge 可执行文件，找不到返回 None。"""
-    if sys.platform == "darwin":  # macOS
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ]
-    elif sys.platform == "win32":  # Windows
-        candidates = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ]
-    else:  # Linux / 其它类 Unix
-        candidates = [
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser",
-            "/usr/bin/microsoft-edge",
-        ]
-    for path in candidates:
-        if Path(path).exists():
-            return path
-    return None
-
-
-def cdp_reachable(cdp_url: str, timeout_s: float = 1.0) -> bool:
-    """探测该地址上是否已有可用的 CDP 调试端口。"""
-    try:
-        with urllib.request.urlopen(cdp_url.rstrip("/") + "/json/version",
-                                    timeout=timeout_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
-
-
-def launch_chrome(port: int, profile: str, url: str, chrome_path: str | None = None,
-                  proxy: str | None = None) -> bool:
-    """启动带远程调试端口的真实 Chrome，返回是否成功拉起进程。
-
-    proxy 非空时加 --proxy-server：Chrome 默认吃系统代理，得显式传一个，
-    「登录过程」才和下载用的是同一个代理。
-    """
-    chrome = chrome_path or find_chrome()
-    if not chrome:
-        log("未找到 Chrome/Edge，请用 --chrome 指定可执行文件路径。")
-        return False
-    profile_dir = Path(profile).resolve()
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    log(f"启动 Chrome: {chrome}（调试端口 {port}，用户数据目录 {profile_dir}）")
-    command = [
-        chrome,
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={profile_dir}",
-        # 关掉「关闭窗口后继续在后台运行」：否则窗口关了 chrome.exe 还留着，
-        # 既占着用户数据目录的锁，也让「退出时关掉 Chrome」名不副实。
-        "--disable-background-mode",
-    ]
-    if proxy:
-        command.append(f"--proxy-server={proxy}")
-    command.append(url)
-    try:
-        subprocess.Popen(command)
-    except Exception as exc:
-        log(f"启动 Chrome 失败: {exc}")
-        return False
-    return True
-
-
-def wait_for_cdp(cdp_url: str, timeout_ms: int = config.CDP_WAIT_MS) -> bool:
-    """等调试端口就绪——Chrome 从启动到监听端口有延迟。"""
-    deadline = time.time() + timeout_ms / 1000
-    while True:
-        if cdp_reachable(cdp_url):
-            return True
-        if time.time() >= deadline:
-            return False
-        time.sleep(0.2)
-
-
-def ensure_cdp(args, proxy: str | None = None) -> bool:
-    """确保存在一个可连的、带调试端口的 Chrome。
-
-    已经开着调试端口就直接复用（退出时也不会去关别人的窗口）；否则自己拉起
-    一个（带上 proxy），退出时负责关闭。
-    """
-    global _we_launched
-    cdp_url = f"http://localhost:{args.port}"
-    if cdp_reachable(cdp_url):
-        log(f"复用已开启调试端口的 Chrome（{cdp_url}），退出时不会关闭它。")
-        if proxy:
-            log("提示：复用这个 Chrome 时 --proxy-server 不生效，它沿用原来的代理设置。")
-        return True
-    if not launch_chrome(args.port, args.profile, args.open_url, args.chrome, proxy):
-        return False
-    if not wait_for_cdp(cdp_url):
-        log(f"等待 {cdp_url} 就绪超时。若这个用户数据目录已被另一个正在运行的 Chrome "
-            "占用，新窗口不会开调试端口——请先关掉那个 Chrome，或换 --profile。")
-        return False
-    _we_launched = True
-    return True
-
-
-def _close_browser() -> None:
-    """关闭本程序启动的 Chrome；复用别人的实例时只断开连接。
-
-    对 CDP 连接直接 browser.close() 只是断开连接，必须显式发 CDP 的
-    Browser.close 才能真正关掉 Chrome。
-    """
-    global _browser
-    browser, _browser = _browser, None
-    if browser is None or not _we_launched:
-        return
-    try:
-        browser.new_browser_cdp_session().send("Browser.close")
-        log("已关闭 Chrome 窗口。")
-    except Exception:
-        pass
+    log(f"连不上 CDP 服务（{url}）。浏览器与登录态由 browserhost 常驻提供，先把它起起来：")
+    log("  cd ../browserhost && python main.py start     # 幂等：已在跑且健康就直接复用")
+    log("  cd ../browserhost && python main.py restart   # 端口有响应但连不上时用它")
+    return False
 
 
 @contextmanager
-def cdp_browser(port: int):
-    """连接已就绪的 Chrome，返回它的默认 context（含登录态）。
+def connect(url: str):
+    """连接常驻 Chrome，返回它的默认 context（登录态就在里面）。
 
-    退出（正常结束、异常或 Ctrl+C）时会关闭本程序启动的 Chrome。
+    退出时只**断开 CDP 连接**（停掉 Playwright 驱动）：浏览器是 browserhost 的，
+    从头到尾不归本程序关。因此这里不调用 `browser.close()`——它对 CDP 连接的语义
+    随版本而变，最坏会把浏览器一起带走，与「只连接」的约定冲突。
     """
-    global _browser
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(f"http://localhost:{port}")
-        _browser = browser
-        context = browser.contexts[0] if browser.contexts else browser.new_context()
-        try:
-            yield context
-        finally:
-            _close_browser()
+    playwright = sync_playwright().start()
+    try:
+        browser = playwright.chromium.connect_over_cdp(url, timeout=CONNECT_TIMEOUT_MS)
+        contexts = browser.contexts
+        if not contexts:
+            raise RuntimeError(f"连上了 {url}，但这个实例没有可用的浏览器上下文（context）。")
+        yield contexts[0]
+    finally:
+        playwright.stop()
 
 
 # ---- 读取用户在 Chrome 里选的视频 ----
@@ -260,7 +125,7 @@ def _all_cookies(context) -> list[dict]:
     return []
 
 
-def export_cookies(context) -> Path | None:
+def export_cookies(context):
     """把 Chrome 里的 cookies 写成 Netscape 格式的临时文件（yt-dlp 用）。
 
     登录态只存在 Chrome 的用户数据目录里，yt-dlp 读不到，所以通过 CDP 取一次
