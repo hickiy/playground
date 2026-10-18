@@ -1,15 +1,16 @@
-# MVPoster - 检索 / 下载 / 发布
+# MVPoster - 手动挑片 / 自动下载 / 自动发布
 
-用 **yt-dlp** 检索 YouTube 候选、下载到 `movies/<日期>/`，再经 **CDP** 发到微信视频号；
-需要登录态的环节（下载要 cookies、发布要扫码登录）一律借**别人常驻的真实 Chrome**。
+人工在 YouTube 挑好短视频，把链接或 id 交给 `python -m src.job`：用 **yt-dlp** 下载到
+`movies/<日期>/`，再经 **CDP** 发到微信视频号；需要登录态的环节（下载要 cookies、发布要
+扫码登录）一律借**别人常驻的真实 Chrome**。
 
 浏览器不归本项目管理：真实 Chrome（含登录态、用户数据目录）由独立项目
 [`browserhost`](../browserhost) 常驻提供——先 `cd ../browserhost && python main.py start`
 起一次，之后调试端口一直可用、窗口随手关掉都行。本项目只通过 **CDP** 连它，做三件事——
 
-1. **检索**：按语义关键词抓 YouTube 候选，按「播放速度」排序，写进 SQLite 去重（`python -m src.cli discover`）；
-2. **下载**：连上常驻 Chrome、导出 cookies 交给 yt-dlp，落盘到 `movies/<当天日期>/`（`python -m src.main`）；
-3. **发布**：新开**自己的**页签，把本地视频填进视频号助手，默认停在「发表」按钮前等人工确认（`python -m src.cli publish`）。
+1. **挑片（人工）**：在 Chrome 里逛 YouTube，或用 `python -m src.cli discover` 看候选后自己拍板；
+2. **下载 + 发布（自动）**：`python -m src.job <链接或 id>` 一条龙走完，全程借常驻 Chrome 的登录态；
+3. **检索（可选）**：按语义关键词抓候选、按「播放速度」排序并写进 SQLite，只作为挑片参考（`python -m src.cli discover`）。
 
 ## 为什么不做客户端
 
@@ -226,58 +227,42 @@ python -m src.cli mark nRDysNZdMvU published --post-id 123456    # 拿到视频�
 - 检索参数（排序 `sp`、时长/播放量阈值、每关键词条数）见 `src/discover.py` 顶部常量，
   也都能用命令行覆盖。
 
-## 无人值守：每天凌晨 03:00 跑一轮（检索 → 下载 → 发布）
+## 手动挑片 → 自动下载 + 发布（`python -m src.job`）
 
-上面那些子命令是**手工**用的。要让它自己每天跑一轮，用 `src.job`——把四个环节串成一次
-运行（检索 → 按播放速度挑前 N 条 → 下载 → 发布）：
-
-```bash
-python -m src.job                     # 一轮 1 条：检索 → 挑选 → 下载 → 发布（默认填完即提交）
-python -m src.job --dry-run           # 只检索 + 挑选并打印计划，不下载、不发布（试跑用）
-python -m src.job --count 2           # 一轮 2 条（两条之间按 --interval 抖动间隔）
-python -m src.job --no-publish        # 半自动：只填表 + 截图，停在「发表」按钮前
-python -m src.job --focus 猫 --count 1
-```
-
-**挑选是确定性的**（按检索打分取前 N），不依赖模型或 API Key ——凌晨没人看着，空跑一次
-比乱发一条便宜。想人工挑片就用 `src.cli` 那套（`discover` → `mark picked` → `publish`）。
-
-再把它挂到 macOS 的 LaunchAgent 上（照搬相邻项目 `jd_car_maintain_grab` 的做法）：
+程序化检索挑出来的素材质量不稳定、下载也时好时坏，所以**不再做无人值守**（macOS 的
+LaunchAgent 定时任务已移除）：**挑哪条由人决定**，把链接或 id 交给 `src.job`，后面的
+下载、填表、发布仍然全自动。
 
 ```bash
-./deploy/macos/install.sh                        # 渲染 plist、加载每天 03:00 的 LaunchAgent
+# 1) 找候选（可选）：按播放速度看一批，挑中后抄下 id / URL
+python -m src.cli discover --top 10
 
-cd ../browserhost && python main.py start        # 常驻 Chrome 必须先起好、两个站点仍是登录态
-
-sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00 # 定时唤醒（launchd 不会唤醒睡着的 Mac）
-pmset -g sched                                   # 确认时间表
+# 2) 一条龙：下载 → 填表 → 核对 → 发布
+python -m src.job dQw4w9WgXcQ
+python -m src.job "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+python -m src.job dQw4w9WgXcQ nRDysNZdMvU        # 多条：中间按 --interval 抖动间隔
+python -m src.job dQw4w9WgXcQ --no-publish       # 只填表 + 截图，停在「发表」前
+python -m src.job dQw4w9WgXcQ --dry-run          # 只校验目标与登录态，不下载、不发布
 ```
 
-两个开关**不改代码**就能调（`run_job.sh` 里的默认值，或给 plist 加 `EnvironmentVariables`）：
-
-| 环境变量 | 默认 | 说明 |
-|---|---|---|
-| `MVPOSTER_COUNT` | `1` | 每轮处理几条 |
-| `MVPOSTER_PUBLISH_MODE` | `--publish` | `--publish` 填完即自动提交；`--no-publish` 只填表等人点发表 |
-
-```bash
-./deploy/macos/run_job.sh --dry-run                          # 不动线上，只看今天会挑哪条
-launchctl kickstart -k gui/$(id -u)/com.mvposter.job         # 按定时任务的方式完整跑一轮
-tail -f logs/mvposter_$(date +%F).log                        # 看这一轮干了什么
-```
-
-细节（时间线、验证、退出码、卸载、注意事项）见 **`deploy/macos/README.md`**。三条要点：
-
-- **登录态会过期**：失效时本轮记 `need_login`、**不改状态机**、保留页签供扫码，一条都不发；
-- **机器得醒着**：`launchd` 不会唤醒睡眠中的 Mac，要 `pmset` 唤醒，还得**不合盖 + 接电源**；
-- **默认是「填完即提交」**：想留一道人工闸门，就把 `MVPOSTER_PUBLISH_MODE` 设成 `--no-publish`。
-
-前置条件还有一条容易踩的（`--dry-run` 会替你先查）：**那只 Chrome 自己必须能打开
-`youtube.com` 并且真的登录过 YouTube**。yt-dlp 靠 `LOGIN_INFO` 这个 cookie 判断登录态，
-只有 Google 的 SSO cookie（`SID` / `HSID` …）而没有它时，YouTube 会回
-`Sign in to confirm you're not a bot`，下载必然失败。补救：让那只 Chrome 能正常访问
-youtube.com 后，在登录状态下访问一次 youtube.com 让 `LOGIN_INFO` 落地——浏览器的代理
-由 browserhost 决定，本项目不碰。
+- **挑片完全人工**：也可以直接在 Chrome 里逛 YouTube，复制地址栏链接；`discover`
+  只是可选的候选助手，不再参与自动决策。
+- **下载失败就重跑同一条命令**：yt-dlp 自己会重试 3 次；仍失败时换条素材或升级
+  `yt-dlp`（`uv lock --upgrade-package yt-dlp && uv sync`）。已下载过的会按 id 复用文件。
+- **已发布的不再重复发**：库里状态为 `published` 的目标会直接跳过；确实要重发加 `--force`。
+- **标题 / 频道自动补齐**：人工粘贴的链接即使不在库里也没关系，下载时 yt-dlp 返回的
+  标题、频道、时长会写回库，用于生成短标题、标签与「来源」一行。
+- **默认「填完即提交」**：想留一道人工闸门就用 `--no-publish`，看完截图
+  （`logs/publish_form_*.png`）自己在浏览器里点「发表」，再回写状态：
+  `python -m src.cli mark <id> published`。
+- **定时任务已清除**：仓库内的 `deploy/macos/` 已删除，本机装过的 LaunchAgent 也已卸载。
+  如果你曾用 `pmset` 加过 02:55 的定时唤醒，可用 `pmset -g sched` 查看、按需自行取消。
+- **前置条件**（`--dry-run` 会替你先查）：常驻 Chrome 里的视频号助手保持登录；那只 Chrome
+  自己必须能打开 `youtube.com` 并且真的登录过 YouTube。yt-dlp 靠 `LOGIN_INFO` 这个 cookie
+  判断登录态，只有 Google 的 SSO cookie（`SID` / `HSID` …）而没有它时，YouTube 会回
+  `Sign in to confirm you're not a bot`，下载必然失败。补救：让那只 Chrome 能正常访问
+  youtube.com 后，在登录状态下访问一次 youtube.com 让 `LOGIN_INFO` 落地——浏览器的代理
+  由 browserhost 决定，本项目不碰。
 
 ## 目录结构
 
@@ -297,10 +282,8 @@ mvposter/
 │   ├── store.py        # SQLite：去重、状态机、与 movies/ 对账
 │   ├── publish.py      # 视频号发布（CDP 新开自己的页签，默认填完即自动提交）
 │   ├── cli.py          # 流水线入口：keywords / discover / list / backfill / mark / publish
-│   ├── job.py          # 无人值守的一轮完整任务：检索 → 挑选 → 下载 → 发布
+│   ├── job.py          # 手动挑片后的一条龙：下载 → 填表 → 发布
 │   └── main.py         # 下载入口：监听当前标签页 / --auto / --download
-├── deploy/
-│   └── macos/          # LaunchAgent：每天 03:00 跑一轮 src.job（install.sh / run_job.sh / plist）
 ├── movies/             # 下载产物（运行时生成，按日期分目录）
 └── logs/               # 按天分的执行日志与发布截图（运行时生成）
 ```

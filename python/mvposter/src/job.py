@@ -1,31 +1,26 @@
-"""无人值守的一轮完整任务：**检索 → 挑选 → 下载 → 发布**（定时任务用的入口）。
+"""手动挑片 → 自动下载 → 自动发布的一条龙入口。
 
-`src.main` 只管「我已经选好了，请下载」，`src.cli` 是分步子命令（`discover` / `mark` /
-`publish`…）。凌晨三点没人敲命令，所以这里把整条链路串成一次运行：
+程序化检索（`src.discover`）挑出来的素材质量不稳定、下载也时好时坏，所以这里不再
+「自动检索 + 自动挑选」：**挑哪条由人决定**，把 YouTube 链接（或 11 位 video id）
+交给本模块，后面的下载、填表、发布仍然全自动。定时任务（macOS LaunchAgent）已移除，
+什么时候跑、跑哪几条都由你决定。
 
-  1. **检索**：按语义生成关键词，抓 YouTube 候选，按「播放速度」排序（逻辑全在
-     `src.discover`，本模块只负责调用与记录）；
-  2. **挑选**：取分数最高的前 ``--count`` 条——确定性规则，不依赖任何模型/API Key，
-     也就不会在凌晨因为「模型今天不想干了」而空跑（要人工介入就用 `src.cli` 那套）；
-  3. **下载**：借常驻 Chrome 的 cookies 交给 yt-dlp，落盘 `movies/<日期>/`；
-  4. **发布**：把本地文件填进视频号助手，默认**填完即提交**；`--no-publish` 则只填表
-     + 截图，停在「发表」按钮前等人工点（早上起来核对一眼再发）。
+挑片的两种方式（都只是找候选，最终仍由人拍板）：
+
+  1. 直接在 Chrome 里逛 YouTube，复制地址栏的链接；
+  2. `python -m src.cli discover --top 10` 看按播放速度排出的候选，挑中后抄下 id / URL。
 
 用法::
 
-    python -m src.job                     # 检索 → 挑 1 条 → 下载 → 发布
-    python -m src.job --count 2           # 一轮 2 条（两条之间按 --interval 抖动间隔）
-    python -m src.job --no-publish        # 只填表停在「发表」前（半自动）
-    python -m src.job --dry-run           # 只检索 + 挑选并打印计划，不下载、不发布
-    python -m src.job --focus 猫 --count 1
+    python -m src.job https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    python -m src.job dQw4w9WgXcQ nRDysNZdMvU      # 多条按顺序处理（中间有抖动间隔）
+    python -m src.job dQw4w9WgXcQ --no-publish     # 只填表 + 截图，停在「发表」前
+    python -m src.job dQw4w9WgXcQ --dry-run        # 只校验目标与登录态，不下载、不发布
 
-定时装载见 `deploy/macos/`（LaunchAgent + caffeinate；凌晨可能睡着，还要 pmset 唤醒）。
+退出码：``0`` 全部成功（含 --no-publish 的「填好表等人工」）/ ``1`` 有环节失败
+（目标看不懂、连不上 CDP、没下下来、发布出错、登录态失效）/ ``130`` 被 Ctrl+C 中断。
 
-退出码：``0`` 这一轮全部成功（含 --no-publish 的「填好表等人工」）/ ``1`` 有环节失败
-（连不上 CDP、没下下来、发布出错、登录态失效）/ ``130`` 被 Ctrl+C 中断。
-
-每一步都写进 `logs/mvposter_YYYY-MM-DD.log`，launchd 的 stdout/stderr 另存
-`logs/launchd.out.log` / `logs/launchd.err.log`；库里状态机随流程推进
+每一步都写进 `logs/mvposter_YYYY-MM-DD.log`；库里状态机随流程推进
 （``found → picked → downloaded → published``，旁支 ``failed``）。
 """
 
@@ -38,12 +33,11 @@ import sys
 import time
 import traceback
 
-from . import (browser, config, discover as discover_mod, downloader,
-               keywords as keywords_mod, publish as publish_mod, store)
+from . import (browser, config, downloader, keywords as keywords_mod,
+               publish as publish_mod, store)
 from . import main as main_mod
 from .logging import log
 
-DEFAULT_COUNT = 1        # 每轮处理几条：保守起步，风控风险最低
 DEFAULT_INTERVAL = 1800  # 两条之间的基准间隔（秒）：30 分钟起，风控上比连着发安全
 INTERVAL_JITTER = 0.2    # 间隔抖动比例：固定的节奏更像机器人
 TITLE_LIMIT = 16         # 短标题字数上限：视频号展示更克制（页面自己的 maxlength 优先）
@@ -84,10 +78,10 @@ def _clean_title(raw: str, limit: int = TITLE_LIMIT) -> str:
     return text.strip()
 
 
-def _tags_for(keyword: str, topic_display: str) -> list[str]:
-    """按命中的检索词配 3~5 个中文话题（命中某动物就把它的中文名排到最前）。"""
-    text = (keyword or "").lower()
-    animal = next((zh for en, zh in sorted(_ANIMAL_ZH.items()) if en in text), None)
+def _tags_for(text: str, topic_display: str) -> list[str]:
+    """按标题配 3~5 个中文话题（命中某动物就把它的中文名排到最前）。"""
+    lowered = (text or "").lower()
+    animal = next((zh for en, zh in sorted(_ANIMAL_ZH.items()) if en in lowered), None)
     ordered = [animal] if animal else []
     ordered += [topic_display, "萌宠", "搞笑动物"]
     tags: list[str] = []
@@ -103,46 +97,51 @@ def _source_line(channel: str) -> str:
     return f"来源：YouTube @{name}" if name else "素材来源：YouTube"
 
 
-def _keywords(args) -> list[str]:
-    """定下这一轮要搜的关键词（与 `src.cli discover` 同一套语义展开）。"""
-    seed = args.seed if args.seed is not None else keywords_mod.default_seed()
-    try:
-        generated = keywords_mod.expand(topic=args.topic, focus=args.focus,
-                                        limit=args.keyword_count, seed=seed)
-    except ValueError as exc:
-        log(f"错误：{exc}")
-        return []
-    topic = keywords_mod.resolve_topic(args.topic).display
-    log(f"关键词 {len(generated)} 个（主题：{topic}，种子 {seed}"
-        + (f"，聚焦 {args.focus}" if args.focus else "") + "）：" + "、".join(generated))
-    return generated
+# 人工给的目标：裸 video id 或 YouTube 链接（watch / shorts / live / youtu.be 都认）
+_BARE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_ID_IN_URL_RE = re.compile(r"(?:[?&]v=|/shorts/|/live/|youtu\.be/)([A-Za-z0-9_-]{11})")
 
 
-def _search(args, conn, proxy) -> list[dict] | None:
-    """检索并返回按分数降序的候选（跳过库里已有的 id）。
+def _extract_video_id(target: str) -> str | None:
+    """从「链接或裸 id」里取出 YouTube 的 11 位 video id；看不懂返回 None。"""
+    text = (target or "").strip()
+    if _BARE_ID_RE.match(text):
+        return text
+    match = _ID_IN_URL_RE.search(text)
+    return match.group(1) if match else None
 
-    返回 None 表示**检索本身失败了**（一条都没抓到），与「抓到一堆但都不合格」不是
-    一回事：后者是正常状态，前者多半是代理/网络断了。无人值守时这两者必须分得清，
-    否则整轮会以「今天没有新候选」静默退出 0。
+
+def _resolve_target(conn, target: str) -> dict | None:
+    """把人工给的目标（链接 / id）变成一条可处理的记录；看不懂返回 None。
+
+    库里已有的记录会带上标题、频道等观测值（`discover` 写过）；没有就先用空值，
+    下载时 yt-dlp 返回的元数据会把它补上。
     """
-    keywords = _keywords(args)
-    if not keywords:
+    video_id = _extract_video_id(target)
+    if not video_id:
+        log(f"错误：看不懂 {target!r}——需要 YouTube 链接或 11 位 video id"
+            "（`python -m src.cli discover --top 10` 会打印候选的 id 与 URL）。")
         return None
-    known = store.known_ids(conn)
-    log(f"库里已有 {len(known)} 条记录，默认跳过（避免重复爬）。")
-    result = discover_mod.discover(
-        keywords, per_keyword=args.per_keyword,
-        max_duration=args.max_duration or None, min_views=args.min_views or None,
-        top=args.top, known=known, proxy=proxy)
-    log(f"结果：抓取 {result['fetched']} 条 -> 过滤 {result['rejected']} 条 -> "
-        f"跳过已知 {result['skipped_known']} 条 -> 去重 {result['duplicated']} 条 -> "
-        f"合格 {result['candidate_total']} 条。")
-    if result["fetched"] == 0:
-        log(f"错误：{len(keywords)} 个关键词一条都没抓到，检索整体失败"
-            f"（代理：{downloader.mask_proxy(proxy) if proxy else '直连'}）。"
-            "这不同于「没有新候选」：先确认代理/网络，再重跑。")
-        return None
-    return result["candidates"]
+
+    row = store.get(conn, video_id)
+    url = (target or "").strip()
+    if not url.startswith("http"):
+        url = f"https://www.youtube.com/watch?v={video_id}"
+    if row is not None and row["url"]:
+        url = row["url"]
+    return {
+        "video_id": video_id,
+        "url": url,
+        "title": (row["title"] if row is not None else "") or "",
+        "channel": (row["channel"] if row is not None else "") or "",
+        "channel_id": (row["channel_id"] if row is not None else "") or "",
+        "views": row["views"] if row is not None else None,
+        "duration": row["duration"] if row is not None else None,
+        "upload_date": (row["upload_date"] if row is not None else "") or "",
+        "keyword": (row["keyword"] if row is not None else "") or "",
+        "score": row["score"] if row is not None else None,
+        "status": row["status"] if row is not None else "found",
+    }
 
 
 def _check_youtube_login(context) -> bool:
@@ -176,31 +175,46 @@ def _check_youtube_login(context) -> bool:
 
 
 def _process(context, conn, item: dict, args, index: int, total: int) -> str:
-    """处理一条候选（下载 + 发布），推进状态机并返回结果标记。"""
+    """处理一条人工选中的目标（下载 + 发布），推进状态机并返回结果标记。"""
     video_id = item["video_id"]
-    raw_title = item.get("title") or ""
     log("-" * 60)
-    log(f"[{index}/{total}] {video_id} | 播放 {(item.get('views') or 0):,} | "
-        f"{(item.get('duration') or 0)}s | {raw_title[:60]}")
+    log(f"[{index}/{total}] {video_id} | {item.get('title') or '（标题待下载时补全）'}")
     log(f"[{index}/{total}] {item.get('url')}")
-    log(f"[{index}/{total}] 频道：{item.get('channel') or '?'} | "
-        f"命中关键词：{item.get('keyword') or '?'}")
+    log(f"[{index}/{total}] 频道：{item.get('channel') or '（待下载时补全）'}")
 
     store.upsert(conn, item)                      # 新的入 found，旧的只刷观测值
-    store.mark(conn, video_id, "picked", note="src.job 自动挑选（按播放速度取前 N）")
+    store.mark(conn, video_id, "picked", note="人工挑片（src.job）")
 
-    # 1) 下载：借常驻 Chrome 的 cookies 交给 yt-dlp
-    path = main_mod.download_once(context, item["url"], raw_title, args)
+    # 1) 下载：借常驻 Chrome 的 cookies 交给 yt-dlp；顺带接住它返回的元数据
+    meta: dict = {}
+    path = main_mod.download_once(context, item["url"], item.get("title") or "",
+                                  args, meta=meta)
     if path is None:
         store.mark(conn, video_id, "failed", note="下载失败（详见日志）")
-        log(f"[{index}/{total}] 下载失败，跳过发布。")
+        log(f"[{index}/{total}] 下载失败，跳过发布（修好后重跑同一条命令即可）。")
         return "download_failed"
+
+    # 人工粘贴的链接可能不在库里：用 yt-dlp 返回的标题 / 频道 / 数据补齐再写回
+    if meta.get("title"):
+        item["title"] = meta["title"]
+    if meta.get("channel"):
+        item["channel"] = meta["channel"]
+    for key in ("views", "duration"):
+        if meta.get(key) is not None:
+            item[key] = meta[key]
+    upload = str(meta.get("upload_date") or "")
+    if len(upload) == 8 and upload.isdigit():      # yt-dlp 给的是 YYYYMMDD
+        upload = f"{upload[:4]}-{upload[4:6]}-{upload[6:]}"
+    if upload:
+        item["upload_date"] = upload
+    store.upsert(conn, item)
     store.mark(conn, video_id, "downloaded", local_path=str(path))
     log(f"[{index}/{total}] 已登记 downloaded：{path}")
 
     # 2) 发布：填表 → 读回核对 → （默认）点「发表」
+    raw_title = item.get("title") or path.stem
     short_title = _clean_title(raw_title, args.title_limit)
-    tags = _tags_for(item.get("keyword") or "", args.topic_display)
+    tags = _tags_for(raw_title, args.topic_display)
     desc = args.desc.strip() if args.desc else ""
     if not args.no_source:
         desc = f"{desc} {_source_line(item.get('channel'))}".strip()
@@ -248,55 +262,72 @@ def _report(outcomes: list[str], planned: int) -> int:
         if counts.get(name):
             log(f"  {name}: {counts[name]}")
     if skipped > 0:
-        log(f"  因登录态失效提前结束，还有 {skipped} 条没处理。")
+        log(f"  未处理 {skipped} 条（登录态失效，已提前结束）。")
     log(f"成功 {ok} 条 / 计划 {planned} 条。")
     return 0 if bad == 0 else 1
 
 
 def run(args) -> int:
-    log("=" * 20 + " MVPoster 完整任务 " + "=" * 20)
-    log(f"本轮计划 {args.count} 条；发布方式："
+    log("=" * 20 + " MVPoster 手动挑片任务 " + "=" * 20)
+    log(f"本轮 {len(args.targets)} 个目标；发布方式："
         + ("--no-publish（只填表 + 截图，停在「发表」前）" if args.no_publish
            else "填完表核对无误即自动提交")
-        + (f"；两条间隔 {args.interval:g}s（±{INTERVAL_JITTER:.0%} 抖动）"
-           if args.count > 1 else ""))
+        + (f"；多条之间间隔 {args.interval:g}s（±{INTERVAL_JITTER:.0%} 抖动）"
+           if len(args.targets) > 1 else ""))
 
-    # 0) 浏览器必须先就绪：下载要 cookies、发布要页签；连不上就别白跑一趟检索
+    conn = store.connect()
+
+    # 1) 把人工给的链接 / id 落成记录；有一条看不懂就整体退出，避免半途而废
+    picks: list[dict] = []
+    seen: set[str] = set()
+    for target in args.targets:
+        item = _resolve_target(conn, target)
+        if item is None:
+            log("运行结束 | 退出码 1（目标无法识别）")
+            return 1
+        if item["video_id"] in seen:
+            log(f"跳过重复目标：{item['video_id']}")
+            continue
+        seen.add(item["video_id"])
+        if item["status"] == "published" and not args.force:
+            log(f"跳过 {item['video_id']}：库里已是 published（确实要重发加 --force）。")
+            continue
+        picks.append(item)
+        log(f"目标 [{len(picks)}] {item['video_id']} | "
+            f"{item.get('title') or '（标题待下载时补全）'}")
+        log(f"           {item['url']}")
+
+    if not picks:
+        log("没有需要处理的目标（全部重复或已发布）。")
+        return 0
+
+    # 2) 浏览器必须先就绪：下载要 cookies、发布要页签
     cdp_url = browser.cdp_url(args.port)
     if not browser.ensure_available(cdp_url):
         log("运行结束 | 退出码 1（连不上 CDP 服务）")
         return 1
 
-    conn = store.connect()
+    if args.dry_run:
+        # 只读地看一眼登录态，正是 --dry-run 最该干的事
+        try:
+            with browser.connect(cdp_url) as context:
+                _check_youtube_login(context)
+        except KeyboardInterrupt:
+            log("运行被中断（Ctrl+C）。")
+            return 130
+        except Exception:
+            log("运行异常终止:\n" + traceback.format_exc().rstrip())
+            return 1
+        log("--dry-run：只校验目标与登录态，不下载、不发布。到此结束。")
+        return 0
+
     proxy = downloader.resolve_proxy()
     log(f"代理：{downloader.mask_proxy(proxy) if proxy else '直连'}（{downloader.proxy_source()}）")
 
-    # 1) 检索 + 挑选
-    candidates = _search(args, conn, proxy)
-    if candidates is None:
-        log("运行结束 | 退出码 1（检索失败）")
-        return 1
-    picks = candidates[:args.count]
-    if not picks:
-        # 「抓到一堆但今天没有新的合格候选」是正常状态，不当失败：调阈值或加关键词即可
-        log("没有新的合格候选：本轮不下载也不发布。"
-            "可以放宽 --min-views / --max-duration，或换个 --focus。")
-        return 0
-
-    print()
-    for index, item in enumerate(picks, 1):
-        log(f"选出 [{index}/{len(picks)}] {item['video_id']} | "
-            f"{(item.get('views') or 0):,} 播放 | {item.get('title', '')[:60]}")
-        log(f"           {item.get('url')}")
-
-    # 2) 逐条下载 + 发布。--dry-run 也连一次 CDP——只读地看一眼登录态，正是它最该干的事。
     outcomes: list[str] = []
     try:
         with browser.connect(cdp_url) as context:
             _check_youtube_login(context)
-            if args.dry_run:
-                log("--dry-run：只检索 + 挑选 + 登录态预检，不下载、不发布。到此结束。")
-                return 0
             for index, item in enumerate(picks, 1):
                 if index > 1:
                     delay = args.interval * random.uniform(1 - INTERVAL_JITTER, 1 + INTERVAL_JITTER)
@@ -305,7 +336,7 @@ def run(args) -> int:
                 outcome = _process(context, conn, item, args, index, len(picks))
                 outcomes.append(outcome)
                 if outcome == "need_login":
-                    log("登录态失效：后面的候选不再尝试（去 browserhost 的 Chrome 里扫码后重跑）。")
+                    log("登录态失效：后面的目标不再尝试（去 browserhost 的 Chrome 里扫码后重跑）。")
                     break
     except KeyboardInterrupt:
         log("运行被中断（Ctrl+C）。")
@@ -320,10 +351,10 @@ def run(args) -> int:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m src.job",
-        description="MVPoster 无人值守完整任务：检索候选 → 自动挑选 → 下载 → 发布到视频号")
-    parser.add_argument("--count", type=int, default=DEFAULT_COUNT,
-                        help=f"这一轮处理几条（按播放速度取前 N），默认 {DEFAULT_COUNT}")
-    # 发布方式：两个开关互斥，默认发布（run_job.sh 会把选中的那个显式传进来）
+        description="MVPoster 手动挑片任务：给 YouTube 链接 / video id → 自动下载 → 发布到视频号")
+    parser.add_argument("targets", nargs="+", metavar="URL_OR_ID",
+                        help="YouTube 链接或 11 位 video id（可给多个，按顺序处理）")
+    # 发布方式：两个开关互斥，默认发布
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--publish", dest="no_publish", action="store_false",
                       help="填完表核对无误即自动提交（默认）")
@@ -331,42 +362,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                       help="只填表 + 截图，停在「发表」按钮前（人工确认后再发）")
     parser.set_defaults(no_publish=False)
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL,
-                        help=f"两条之间的间隔秒数，默认 {DEFAULT_INTERVAL:g}"
-                             "（每次还会随机浮动一下，--count 1 时用不到）")
+                        help=f"多条之间的间隔秒数，默认 {DEFAULT_INTERVAL:g}"
+                             "（每次还会随机浮动一下，只给 1 条时用不到）")
     parser.add_argument("--title-limit", type=int, default=TITLE_LIMIT,
                         help=f"短标题最多多少字，默认 {TITLE_LIMIT}")
     parser.add_argument("--desc", default=DEFAULT_DESC,
                         help=f"视频描述正文，默认「{DEFAULT_DESC}」")
     parser.add_argument("--no-source", action="store_true",
                         help="描述里不加「来源：YouTube @频道」（默认加，注明素材出处）")
+    parser.add_argument("--topic", default=keywords_mod.DEFAULT_TOPIC,
+                        help=f"话题里的主题名，默认 {keywords_mod.DEFAULT_TOPIC}（只影响标签）")
     parser.add_argument("--quality", choices=downloader.QUALITIES, default="1080",
                         help="清晰度上限，默认 1080；best 表示不限")
     parser.add_argument("--port", type=int, default=config.CDP_PORT,
                         help=f"browserhost 的调试端口，默认 {config.CDP_PORT}")
     parser.add_argument("--dry-run", action="store_true",
-                        help="只检索 + 挑选并打印计划，不下载、不发布（试跑 / 排查用）")
-
-    # 关键词与检索参数：与 `src.cli discover` 保持一致，改一边就够
-    parser.add_argument("--topic", default=keywords_mod.DEFAULT_TOPIC,
-                        help=f"语义主题，默认 {keywords_mod.DEFAULT_TOPIC}")
-    parser.add_argument("--focus", help="聚焦某种动物，如 猫 / 狗 / 鹦鹉（中英文都认）")
-    parser.add_argument("--keyword-count", type=int, default=keywords_mod.DEFAULT_LIMIT,
-                        help=f"生成多少个关键词，默认 {keywords_mod.DEFAULT_LIMIT}")
-    parser.add_argument("--seed", type=int,
-                        help="生成种子，默认当天日期（同一天可复现，第二天换一批）")
-    parser.add_argument("--per-keyword", type=int, default=discover_mod.DEFAULT_PER_KEYWORD,
-                        help=f"每个关键词抓多少条，默认 {discover_mod.DEFAULT_PER_KEYWORD}")
-    parser.add_argument("--max-duration", type=int, default=discover_mod.DEFAULT_MAX_DURATION,
-                        help=f"时长上限（秒），0 表示不限，默认 {discover_mod.DEFAULT_MAX_DURATION}")
-    parser.add_argument("--min-views", type=int, default=discover_mod.DEFAULT_MIN_VIEWS,
-                        help=f"播放量下限，0 表示不限，默认 {discover_mod.DEFAULT_MIN_VIEWS}")
-    parser.add_argument("--top", type=int, default=discover_mod.DEFAULT_TOP,
-                        help=f"候选池最多留多少条（再取前 --count 条），默认 {discover_mod.DEFAULT_TOP}")
+                        help="只校验目标与登录态，不下载、不发布（试跑 / 排查用）")
+    parser.add_argument("--force", action="store_true",
+                        help="即使库里已是 published 也重新下载并发布")
 
     args = parser.parse_args(argv)
-    if args.count < 1:
-        parser.error("--count 至少为 1")
-    # download_once 读的是 args.platform（本入口只搜 YouTube，不额外限制）
+    # download_once 读的是 args.platform（本入口只处理 YouTube，不额外限制）
     args.platform = None
     # 话题里的主题名固定用标准显示名（--topic 允许写别名）
     try:

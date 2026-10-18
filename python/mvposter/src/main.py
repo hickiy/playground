@@ -77,12 +77,14 @@ def _poll_key() -> str:
         return ""
 
 
-def download_once(context, url: str, title: str, args) -> Path | None:
+def download_once(context, url: str, title: str, args,
+                  meta: dict | None = None) -> Path | None:
     """下载 ``url`` 指向的视频，返回落盘路径；失败返回 None。
 
     返回路径而不是布尔值，是为了让 ``src.job`` 这种编排入口能拿着同一条路径
     接着做发布（成功时返回 Path，恒为真；失败返回 None）——监听循环里只判真假，
-    行为不变。
+    行为不变。给了 ``meta`` 时，yt-dlp 返回的标题 / 频道 / 时长等元数据会写进去，
+    供人工粘贴链接（库里还没有记录）时补齐标题与出处。
     """
     log(f"开始下载：{title or url}")
     if not config.is_video_page(url, args.platform):
@@ -100,7 +102,7 @@ def download_once(context, url: str, title: str, args) -> Path | None:
 
     try:
         path = downloader.download(url, quality=args.quality,
-                                   proxy=proxy, cookies_file=cookies_file)
+                                   proxy=proxy, cookies_file=cookies_file, meta=meta)
     finally:
         if cookies_file is not None:
             try:
