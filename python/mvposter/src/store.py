@@ -1,19 +1,14 @@
-"""候选池的 SQLite 记录：去重、状态机、以及和 movies/ 目录的对账。
+"""下载记录（SQLite）：去重、本地文件与元数据。
 
-只用标准库 sqlite3，数据库落在 data/mvposter.db（见 src/config.py）。
+本仓库只负责下载，所以库里只有「下载成功」这一种记录：
 
-主键取 YouTube 的 video_id：它跨平台唯一、稳定，比标题可靠（标题会改、会重名）。
-discover（见 src/discover.py）只挑 store 里没见过的 id，所以「爬过的不会重复」；
-下载完执行 ``backfill`` 会把 movies/ 里已有的文件登记成 downloaded，
-发布成功再用 ``mark`` 写回 post_id，整条链路的状态都留在一张表里。
+- 主键是去重键（YouTube 是 11 位 video_id，其他站点是 ``平台:URL``，见
+  ``src/config.py`` 的 ``dedupe_key``）；
+- 每次下载前先 :func:`get`，命中就抛 :class:`DuplicateVideo`，由入口**立即终止任务**；
+- 下载成功后 :func:`record_download` 写入标题 / 频道 / 播放量 / 时长 / 上线日期 /
+  本地路径；写完这次任务就结束，没有任何发布环节。
 
-状态机（status）::
-
-    found -> picked -> downloaded -> published
-                      \\-> failed（附 note）
-    任何阶段也可以记 skipped（不想要的内容）
-
-字段说明见 _SCHEMA；``views`` / ``score`` 是**检索当时**的快照，不是实时值。
+数据库落在 ``data/mvposter.db``（见 ``src/config.py``），``data/`` 不进版本库。
 """
 
 from __future__ import annotations
@@ -26,34 +21,35 @@ from pathlib import Path
 from . import config
 from .logging import log
 
-# 状态取值（顺序即正常流转顺序；failed / skipped 是旁支）
-STATUSES = ("found", "picked", "downloaded", "published", "failed", "skipped")
-
-# 文件名形如「标题 [dQw4w9WgXcQ].mp4」：id 由 yt-dlp 的 outtmpl 带出，见 src/downloader.py
+# 文件名形如「标题 [dQw4w9WgXcQ].mp4」：backfill 靠方括号里的 id 与 movies/ 对账
 _ID_IN_NAME = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
-    video_id    TEXT PRIMARY KEY,   -- YouTube 视频 id（去重键）
-    url         TEXT NOT NULL,
-    title       TEXT,
-    channel     TEXT,
-    channel_id  TEXT,
-    views       INTEGER,            -- 检索时的播放量快照
-    duration    INTEGER,            -- 秒
-    upload_date TEXT,               -- YYYY-MM-DD，拿不到就是空
-    keyword     TEXT,               -- 命中的检索词
-    score       REAL,               -- 本地排序分（播放速度，见 discover.score）
-    status      TEXT NOT NULL DEFAULT 'found',
-    local_path  TEXT,               -- 下载后的本地文件
-    post_id     TEXT,               -- 视频号发布后的标识
-    published_at TEXT,
-    note        TEXT,               -- 失败原因等备注
-    first_seen  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    video_id      TEXT PRIMARY KEY,   -- 去重键：YouTube 11 位 id / 平台:URL
+    url           TEXT NOT NULL,
+    title         TEXT,
+    channel       TEXT,
+    views         INTEGER,            -- 下载时的播放量快照
+    duration      INTEGER,            -- 秒
+    upload_date   TEXT,               -- YYYY-MM-DD，拿不到就是空
+    local_path    TEXT NOT NULL,      -- 落盘文件
+    downloaded_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
 """
+
+
+class DuplicateVideo(Exception):
+    """目标已在库中：按约定入口应立即终止任务。"""
+
+    def __init__(self, video_id: str, row: sqlite3.Row):
+        self.video_id = video_id
+        self.row = row
+        title = row["title"] or "（无标题）"
+        super().__init__(
+            f"重复：{video_id} 已在数据库中（{title}，"
+            f"{row['downloaded_at']}，{row['local_path']}）。按约定立即终止任务。"
+        )
 
 
 def now_text() -> str:
@@ -70,117 +66,59 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def known_ids(conn: sqlite3.Connection) -> set[str]:
-    """库里所有已知 video_id —— discover 用它做去重。"""
-    return {row[0] for row in conn.execute("SELECT video_id FROM videos")}
-
-
-def upsert(conn: sqlite3.Connection, item: dict) -> bool:
-    """写入一条候选：新的返回 True，已存在的刷新统计后返回 False。
-
-    只刷新「会变的观测值」（标题/播放量/时长/排序分）；状态、本地路径、
-    发布时间这些是流程进度，不能被一次重新检索覆盖掉。
-    """
-    stamp = now_text()
-    cur = conn.execute(
-        """
-        INSERT INTO videos (video_id, url, title, channel, channel_id, views,
-                            duration, upload_date, keyword, score, status,
-                            first_seen, updated_at)
-        VALUES (:video_id, :url, :title, :channel, :channel_id, :views,
-                :duration, :upload_date, :keyword, :score, :status,
-                :stamp, :stamp)
-        ON CONFLICT(video_id) DO UPDATE SET
-            url         = excluded.url,
-            title       = excluded.title,
-            channel     = excluded.channel,
-            views       = excluded.views,
-            duration    = excluded.duration,
-            score       = excluded.score,
-            keyword     = excluded.keyword,
-            updated_at  = excluded.updated_at
-        """,
-        {
-            "video_id": item["video_id"],
-            "url": item["url"],
-            "title": item.get("title") or "",
-            "channel": item.get("channel") or "",
-            "channel_id": item.get("channel_id") or "",
-            "views": item.get("views"),
-            "duration": item.get("duration"),
-            "upload_date": item.get("upload_date") or "",
-            "keyword": item.get("keyword") or "",
-            "score": item.get("score"),
-            "status": item.get("status") or "found",
-            "stamp": stamp,
-        },
-    )
-    conn.commit()
-    return cur.rowcount == 1  # INSERT 成功才影响 1 行；UPDATE 分支不算新发现
-
-
 def get(conn: sqlite3.Connection, video_id: str) -> sqlite3.Row | None:
-    """按 id 取一条记录，没有返回 None。"""
+    """按去重键取一条下载记录，没有返回 None。"""
     return conn.execute("SELECT * FROM videos WHERE video_id = ?", (video_id,)).fetchone()
 
 
-def mark(conn: sqlite3.Connection, video_id: str, status: str,
-         note: str | None = None, post_id: str | None = None,
-         local_path: str | None = None) -> bool:
-    """更新一条记录的状态（只写传入的字段），返回是否命中记录。"""
-    if status not in STATUSES:
-        raise ValueError(f"未知状态 {status!r}，可选：{'/'.join(STATUSES)}")
-    sets = ["status = ?", "updated_at = ?"]
-    values: list[object] = [status, now_text()]
-    if note is not None:
-        sets.append("note = ?")
-        values.append(note)
-    if post_id is not None:
-        sets.append("post_id = ?")
-        values.append(post_id)
-        sets.append("published_at = ?")
-        values.append(now_text())
-    if local_path is not None:
-        sets.append("local_path = ?")
-        values.append(local_path)
-    values.append(video_id)
-    cur = conn.execute(f"UPDATE videos SET {', '.join(sets)} WHERE video_id = ?", values)
+def record_download(conn: sqlite3.Connection, video_id: str, url: str,
+                    meta: dict, path: Path) -> None:
+    """记录一次成功的下载（调用前必须已经确认过 key 不在库里）。"""
+    upload = str(meta.get("upload_date") or "")
+    if len(upload) == 8 and upload.isdigit():      # yt-dlp 给的是 YYYYMMDD
+        upload = f"{upload[:4]}-{upload[4:6]}-{upload[6:]}"
+    conn.execute(
+        """
+        INSERT INTO videos (video_id, url, title, channel, views, duration,
+                            upload_date, local_path, downloaded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            video_id,
+            url,
+            meta.get("title") or "",
+            meta.get("channel") or "",
+            meta.get("views"),
+            meta.get("duration"),
+            upload,
+            str(path),
+            now_text(),
+        ),
+    )
     conn.commit()
-    return cur.rowcount > 0
+    log(f"已写入数据库：{video_id} -> {path}")
 
 
-def listing(conn: sqlite3.Connection, status: str | None = None,
-            limit: int = 20) -> list[sqlite3.Row]:
-    """按排序分从高到低列出记录；status 为 None 表示全部状态。"""
-    sql = "SELECT * FROM videos"
-    params: list[object] = []
-    if status:
-        sql += " WHERE status = ?"
-        params.append(status)
-    sql += " ORDER BY COALESCE(score, 0) DESC, COALESCE(views, 0) DESC LIMIT ?"
-    params.append(limit)
-    return list(conn.execute(sql, params))
+def listing(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    """按下载时间倒序列出记录。"""
+    return list(conn.execute(
+        "SELECT * FROM videos ORDER BY downloaded_at DESC LIMIT ?", (limit,)))
 
 
-def summary(conn: sqlite3.Connection) -> dict[str, int]:
-    """各状态各有多少条（日志里报一句，方便判断流水线卡在哪）。"""
-    counts = dict.fromkeys(STATUSES, 0)
-    for status, count in conn.execute("SELECT status, COUNT(*) FROM videos GROUP BY status"):
-        counts[status] = count
-    counts["total"] = sum(counts[name] for name in STATUSES)
-    return counts
+def count(conn: sqlite3.Connection) -> int:
+    """库里一共有多少条下载记录。"""
+    return conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
 
 
-def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
-    """把 movies/ 里已有的文件登记进库，返回（新登记条数，标记为已下载的条数）。
+def backfill(conn: sqlite3.Connection) -> int:
+    """把 movies/ 里已有的历史文件补登记进库，返回新增条数。
 
-    下载目录是 movies/<日期>/<标题> [id].ext，文件名里已经带了 video_id，
-    所以不用重新解析页面就能和库对上；已经标过 downloaded 的不重复写。
+    文件名里带 ``[11位id]`` 才能对上；已经登记过的不重复写。补登记之后，
+    同一条视频再次下载就会被查重拦住。
     """
     if not config.MOVIES_DIR.exists():
-        return 0, 0
+        return 0
     added = 0
-    marked = 0
     for path in sorted(config.MOVIES_DIR.rglob("*")):
         if not path.is_file():
             continue
@@ -188,25 +126,15 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
         if not match:
             continue
         video_id = match.group(1)
-        title = _ID_IN_NAME.sub("", path.stem).strip()
-        row = get(conn, video_id)
-        if row is None:
-            upsert(conn, {"video_id": video_id, "url": f"https://www.youtube.com/watch?v={video_id}",
-                          "title": title, "status": "downloaded"})
-            mark(conn, video_id, "downloaded", local_path=str(path))
-            added += 1
+        if get(conn, video_id) is not None:
             continue
-        if row["status"] not in ("downloaded", "published") or not row["local_path"]:
-            mark(conn, video_id, "downloaded" if row["status"] != "published" else "published",
-                 local_path=str(path))
-            marked += 1
-    return added, marked
-
-
-def latest_local_path(conn: sqlite3.Connection, video_id: str) -> Path | None:
-    """该视频下载到本地后的文件路径（没下过返回 None）。"""
-    row = get(conn, video_id)
-    if row is None or not row["local_path"]:
-        return None
-    path = Path(row["local_path"])
-    return path if path.exists() else None
+        title = _ID_IN_NAME.sub("", path.stem).strip()
+        conn.execute(
+            "INSERT INTO videos (video_id, url, title, local_path, downloaded_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (video_id, f"https://www.youtube.com/watch?v={video_id}",
+             title, str(path), now_text()),
+        )
+        added += 1
+    conn.commit()
+    return added

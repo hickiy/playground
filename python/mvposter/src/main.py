@@ -1,13 +1,17 @@
 """MVPoster —— 通过 CDP 借常驻 Chrome 的登录态，用 yt-dlp 下载视频（下载入口）。
 
+本仓库**只负责下载**：不检索、不发布。
+
 **浏览器不归本程序管**：真实 Chrome（含登录态、用户数据目录）由独立项目
 browserhost 常驻提供，先 `cd ../browserhost && python main.py start` 起一次即可，
 之后窗口随手关掉都行。本程序只连接它的调试端口（连不上就提示怎么启动，绝不自己
-拉一个浏览器），然后做三件事——
+拉一个浏览器），然后做四件事——
 
   1. 通过 CDP 盯着「用户当前激活的那个标签页」，把标题 / URL 打到终端；
-  2. 用户按下回车时，导出 Chrome 的 cookies 交给 yt-dlp（登录态只存在它的 profile）；
-  3. 下载到 movies/<当天日期>/。
+  2. 用户按下回车时，先查本地数据库：**已下载过就提示重复并立即终止任务**；
+  3. 导出 Chrome 的 cookies 交给 yt-dlp（登录态只存在它的 profile），下载到
+     movies/<当天日期>/；
+  4. 把标题 / 频道 / 播放量 / 时长 / 本地路径写进数据库，任务结束。
 
 触发下载为什么不放在浏览器里：视频站点依赖真实登录态与风控环境，只有真实
 Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等于又做一个客户端）。
@@ -18,7 +22,7 @@ Chrome 才稳，而给 Chrome 加一个「下载按钮」就得写扩展（等�
     python -m src.main                 # 进入监听：在浏览器里选好视频，回终端按回车
     python -m src.main --auto          # 切到视频页停留 3s 自动下载（同一 URL 只下一次）
     python -m src.main --download URL  # 直接下载该 URL 后退出
-    python -m src.main --platform tiktok --auto   # 只认 TikTok 的视频页
+    python -m src.main --platform youtube --auto   # 只认 YouTube 的视频页
 
 前置条件：① browserhost 已在跑（`python main.py start`，调试端口 9222 可用）；
 ② 系统里装有 ffmpeg（yt-dlp 合并分轨要用）——它是系统里的外部工具，本程序不安装、
@@ -31,7 +35,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import browser, config, downloader
+from . import browser, config, downloader, store
 from .browser import log
 
 _KEYBOARD_OK = True  # 终端是否支持非阻塞按键读取（管道 / 重定向时不可用）
@@ -81,11 +85,17 @@ def download_once(context, url: str, title: str, args,
                   meta: dict | None = None) -> Path | None:
     """下载 ``url`` 指向的视频，返回落盘路径；失败返回 None。
 
-    返回路径而不是布尔值，是为了让 ``src.job`` 这种编排入口能拿着同一条路径
-    接着做发布（成功时返回 Path，恒为真；失败返回 None）——监听循环里只判真假，
-    行为不变。给了 ``meta`` 时，yt-dlp 返回的标题 / 频道 / 时长等元数据会写进去，
-    供人工粘贴链接（库里还没有记录）时补齐标题与出处。
+    下载前先按去重键查库：已有记录就抛 :class:`src.store.DuplicateVideo`，
+    调用方应立即终止任务。下载成功后把标题 / 频道 / 本地路径等写进数据库。
+    给了 ``meta`` 时，yt-dlp 返回的元数据也会写进这个字典。
     """
+    key = config.dedupe_key(url)
+    conn = store.connect()
+    row = store.get(conn, key)
+    if row is not None:
+        raise store.DuplicateVideo(key, row)
+
+    meta = {} if meta is None else meta
     log(f"开始下载：{title or url}")
     if not config.is_video_page(url, args.platform):
         log("  该 URL 不在已识别的视频页规则内，仍然交给 yt-dlp 尝试。")
@@ -112,6 +122,7 @@ def download_once(context, url: str, title: str, args,
 
     if path is None:
         return None
+    store.record_download(conn, key, url, meta, path)
     log(f"已保存：{path}")
     return path
 
@@ -237,6 +248,9 @@ def main(argv: list[str] | None = None) -> int:
                 code = 0 if download_once(context, args.download, "", args) else 1
             else:
                 code = watch(context, args)
+    except store.DuplicateVideo as exc:
+        log(str(exc))
+        code = 2
     except KeyboardInterrupt:
         log("运行被中断（Ctrl+C）。")
         code = 130

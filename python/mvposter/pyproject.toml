@@ -1,10 +1,10 @@
 [project]
 name = "mvposter"
 version = "0.2.0"
-description = "通过 CDP 连常驻 Chrome：检索 YouTube 候选、下载、发到视频号"
+description = "通过 CDP 连常驻 Chrome，用 yt-dlp 下载 YouTube 短视频（下载前查重并记录到 SQLite）"
 readme = "README.md"
 requires-python = ">=3.10"
-keywords = ["youtube", "tiktok", "cdp", "playwright", "yt-dlp", "downloader"]
+keywords = ["youtube", "download", "cdp", "playwright", "yt-dlp", "dedupe"]
 dependencies = [
     # 只用来连 browserhost 那个常驻 Chrome 的调试端口（connect_over_cdp），
     # 不用它自带的 Chromium，也不需要 playwright install
@@ -15,5 +15,5 @@ dependencies = [
 ]
 
 [tool.uv]
-# 不做本地打包：避免触发 setuptools 构建（本项目只以 python -m src.main / -m src.cli 运行）
+# 不做本地打包：避免触发 setuptools 构建（本项目只以 python -m src.main / -m src.job / -m src.cli 运行）
 package = false

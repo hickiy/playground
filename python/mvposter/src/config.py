@@ -8,7 +8,7 @@ from typing import NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 MOVIES_DIR = ROOT / "movies"   # 下载产物：movies/<日期>/<标题>.<ext>
 LOG_DIR = ROOT / "logs"        # 按天分的执行日志
-DATA_DIR = ROOT / "data"       # 本地记录：候选池 / 去重 / 发布状态（见 src/store.py）
+DATA_DIR = ROOT / "data"       # 本地记录：下载历史 / 去重（见 src/store.py）
 DB_FILE = DATA_DIR / "mvposter.db"
 # ffmpeg 是系统里的外部工具（PATH / Homebrew / winget）：本程序不安装、不代管、也不检查，
 # 项目内也不放副本（原来那份 resources/bin 已删除）
@@ -69,3 +69,30 @@ def is_video_page(url: str, platform: str | None = None) -> bool:
     """该 URL 是否属于已识别的视频页；给了 platform 就只看该平台。"""
     keyword = platform_of(url)
     return keyword is not None and (platform is None or keyword == platform)
+
+
+# ---- 去重键 ----
+_YT_BARE_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YT_ID_IN_URL = re.compile(r"(?:[?&]v=|/shorts/|/live/|youtu\.be/)([A-Za-z0-9_-]{11})")
+
+
+def youtube_id(text: str) -> str | None:
+    """从链接或裸 id 里取出 YouTube 的 11 位 video id；不是 YouTube 返回 None。"""
+    value = (text or "").strip()
+    if _YT_BARE_ID.match(value):
+        return value
+    match = _YT_ID_IN_URL.search(value)
+    return match.group(1) if match else None
+
+
+def dedupe_key(text: str) -> str:
+    """数据库去重键。
+
+    YouTube 统一用 11 位 video_id（watch / shorts / live / youtu.be 都归一到同一个键）；
+    其他站点用 ``平台:URL``，没识别出平台时用 ``url:`` 前缀。
+    """
+    value = (text or "").strip()
+    found = youtube_id(value)
+    if found:
+        return found
+    return f"{platform_of(value) or 'url'}:{value}"

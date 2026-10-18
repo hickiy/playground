@@ -2,7 +2,7 @@
 
 浏览器与 profile 已经交给独立项目 **browserhost**，本项目不再依赖它的库接口，
 这份实现就自带一份（文件名前缀仍是 ``mvposter_``，与历史日志衔接）。
-定时任务可能随时被终止，因此每行写完立即 flush。
+任务可能被 Ctrl+C 或异常终止，因此每行写完立即 flush。
 """
 
 import sys
@@ -47,5 +47,5 @@ def log(msg: str) -> None:
     try:
         print(f"[{stamp}] {msg}", flush=True)
     except Exception:
-        pass  # 无人值守时可能没有可用的 stdout
+        pass  # stdout 被重定向或关闭时不影响写日志文件
     _write_log(f"[{now.strftime('%Y-%m-%d')} {stamp}] {msg}")

@@ -234,7 +234,7 @@ def download(url: str, quality: str = "1080", proxy: str | None = None,
     """下载单个视频到 movies/<当天>/，返回最终文件路径；失败返回 None。
 
     ``meta`` 不为 None 时，yt-dlp 返回的元数据（标题、频道、播放量、时长、上线日期）
-    会写进这个字典——人工粘贴的链接不在库里时，`src.job` 靠它补齐发布要用的字段。
+    会写进这个字典——下载成功后由 `src.main` 写进本地数据库。
     """
     out_dir = day_dir()
     # 系统里找得到 ffmpeg 就把位置交给 yt-dlp（找不到也不拦：它自己会去 PATH 找）

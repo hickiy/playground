@@ -1,44 +1,54 @@
-# MVPoster - 手动挑片 / 自动下载 / 自动发布
+# MVPoster - YouTube 短视频下载器
 
-人工在 YouTube 挑好短视频，把链接或 id 交给 `python -m src.job`：用 **yt-dlp** 下载到
-`movies/<日期>/`，再经 **CDP** 发到微信视频号；需要登录态的环节（下载要 cookies、发布要
-扫码登录）一律借**别人常驻的真实 Chrome**。
+人工挑好短视频后，把 YouTube 链接或 11 位 video id 交给 `python -m src.job`：
 
-浏览器不归本项目管理：真实 Chrome（含登录态、用户数据目录）由独立项目
-[`browserhost`](../browserhost) 常驻提供——先 `cd ../browserhost && python main.py start`
-起一次，之后调试端口一直可用、窗口随手关掉都行。本项目只通过 **CDP** 连它，做三件事——
+1. **查重**：先查 `data/mvposter.db`，已有记录就提示重复并**立即终止任务**；
+2. **下载**：借 browserhost 常驻 Chrome 的登录态 cookies，用 yt-dlp 下载到 `movies/<日期>/`；
+3. **记录**：把标题、频道、播放量、时长、上线日期、本地路径写进 SQLite；
+4. **结束**：下载完这次任务就结束。
 
-1. **挑片（人工）**：在 Chrome 里逛 YouTube，或用 `python -m src.cli discover` 看候选后自己拍板；
-2. **下载 + 发布（自动）**：`python -m src.job <链接或 id>` 一条龙走完，全程借常驻 Chrome 的登录态；
-3. **检索（可选）**：按语义关键词抓候选、按「播放速度」排序并写进 SQLite，只作为挑片参考（`python -m src.cli discover`）。
+本仓库**只负责下载**：不做程序化检索，也不做发布。视频描述与标题由你自己在发布时处理。
 
 ## 为什么不做客户端
 
 旧版是 Electron 内嵌浏览器。视频站点只认**真实登录态与风控环境**，内嵌浏览器要复刻 cookie
-提取、UA、指纹，维护成本全花在「把事情弄成不是浏览器」上。现在改成各司其职：
+提取、UA、指纹，维护成本全花在「把事情弄成不是浏览器」上。现在各司其职：
 
 | 职责 | 由谁承担 |
 |---|---|
 | 浏览器内核、登录、反爬环境 | 用户自己的 Chrome（真实、受信任） |
-| 选哪条视频 | 用户在 Chrome 里打开它 |
-| 触发下载 | 终端里一次回车（或 `--auto`） |
+| 选哪条视频 | 用户自己决定（复制链接，或在 Chrome 里打开） |
+| 触发下载 | `python -m src.job <链接或 id>`，或终端里一次回车 |
+| 查重与记录 | 本地 SQLite（`data/mvposter.db`） |
 | 真正下载 / 合并 | yt-dlp + ffmpeg |
 | 登录态传递 | CDP 导出 cookies 给 yt-dlp（一次一个临时文件，用完即删） |
-| 发布 | CDP 新开**自己的**页签，把本地视频填进视频号助手的发布页 |
 
 代价是必须在项目根目录 `movies/` 里找产物、浏览器窗口归 browserhost 管（本项目既不启动
 也不关闭它）；换来的是零安装体积、零 UI 代码，站点改版也不会连带把 UI 弄坏。
 
-## 触发下载是怎么设计的
+## 查重规则（重要）
+
+- 去重键：YouTube 统一取 **11 位 video_id**，`watch` / `shorts` / `live` / `youtu.be`
+  链接都会归一到同一个键；其他站点用 `平台:URL`。
+- 每次下载前都会查库。**命中已有记录 → 打印标题、下载时间、本地路径，立即终止任务，
+  退出码 `2`**，不会再下载、也不会覆盖文件。
+- 只有**下载成功**才写库；下载失败不留下记录，修好后重跑同一条命令即可。
+- 数据库被清空后，历史文件不会被自动识别。需要把 `movies/` 里的旧文件补登记进库时：
+  `python -m src.cli backfill`（文件名里的 `[11位id]` 就是去重键）。
+- 想彻底清空查重历史：删掉 `data/mvposter.db` 即可（下次运行会自动重建空库）。
+
+## 触发下载的三种方式
 
 Chrome 侧不注入任何脚本（注入就要写扩展 = 又一个客户端），所以触发点都在程序侧：
 
-- **回车（默认）**：程序每 0.3s 问一次 CDP「哪个标签页被激活」，把它的标题 / URL 打到
-  终端；你切到目标视频页后回终端按一次回车，就下载**当前激活标签页**。只在你按键的那一刻
-  取当前页，所以不会误下。
-- **`--auto`**：切到视频页后**停留** `--auto-delay` 秒（默认 3s）才下载，中途切走即取消；
-  同一 URL 只下一次。适合连续下多条，代价是有误下风险。
-- **`--download <url>`**：不走交互，直接下载给定 URL 后退出，方便脚本化。
+- **`python -m src.job <链接或 id>`（推荐）**：一次性任务，查重 → 下载 → 记录 → 结束。
+- **`python -m src.main`（交互）**：程序每 0.3s 问一次 CDP「哪个标签页被激活」，你切到目标
+  视频页后回终端按一次回车，就下载**当前激活标签页**。只在你按键的那一刻取当前页，不会误下。
+- **`python -m src.main --auto`**：切到视频页后**停留** `--auto-delay` 秒（默认 3s）才下载，
+  中途切走即取消；同一 URL 只下一次。
+- **`python -m src.main --download <url>`**：不走交互，直接下载给定 URL 后退出。
+
+以上方式共用同一套查重：一旦命中已有记录，都会提示重复并立即终止（退出码 `2`）。
 
 「当前激活」用页面自身的 `document.hasFocus()` / `visibilityState` 判断（CDP 没有
 「选中了哪个 tab」这种字段）；标题 / URL 变化时才打日志，终端不会被刷屏。
@@ -61,10 +71,10 @@ Chrome 侧不注入任何脚本（注入就要写扩展 = 又一个客户端）�
 
 ```bash
 # Windows PowerShell
-$env:HTTPS_PROXY = "http://127.0.0.1:7890"; python -m src.main
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"; python -m src.job <链接或id>
 
 # macOS / Linux
-export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
+export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.job <链接或id>
 ```
 
 优先级：**环境变量 > `config.json` > 内置默认值**。启动日志会写明当前用的是哪个代理、
@@ -72,7 +82,7 @@ export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
 
 几个约定：
 
-- 浏览器（登录、发布）走什么代理由 browserhost 启动那个 Chrome 时的设置决定；本项目不加
+- 浏览器（登录）走什么代理由 browserhost 启动那个 Chrome 时的设置决定；本项目不加
   `--proxy-server`、也不改那个实例的代理——它是别的任务共用的。
 - yt-dlp 不读环境变量、也不读 `config.json`，是程序读出来显式传给它的；日志里只打印
   打码后的地址（`http://***@host:port`），不带用户名密码就别写进命令行。
@@ -85,7 +95,7 @@ export HTTPS_PROXY=http://127.0.0.1:7890 && python -m src.main
 cd ../browserhost && python main.py start          # 0. 起常驻 Chrome（幂等；已在跑且健康就复用）
 uv sync                                            # 1. Python 依赖装进项目内 .venv（yt-dlp[default] = yt-dlp + 官方 EJS 脚本包）
 brew install ffmpeg                                # 2. 系统里要有 ffmpeg（Windows 用 winget install Gyan.FFmpeg）——本程序不装也不管
-.venv/bin/python -m src.main                       # 3. 运行（Windows 用 .venv\Scripts\python.exe）
+.venv/bin/python -m src.job <链接或id>             # 3. 运行（Windows 用 .venv\Scripts\python.exe）
 ```
 
 `uv` 本身：`winget install astral-sh.uv`（Windows）/ `brew install uv`（macOS）。
@@ -107,26 +117,67 @@ Playwright 自带的 Chromium。
 
 ## 使用
 
+### 一次性下载任务（推荐）
+
 ```bash
-# 默认：进入监听，在浏览器里选好视频后回终端按回车（浏览器先由 browserhost 起好）
+# 链接或 11 位 video id 都行；多条按顺序处理
+python -m src.job "https://www.youtube.com/shorts/xxxxxxxxxxx"
+python -m src.job dQw4w9WgXcQ
+python -m src.job dQw4w9WgXcQ nRDysNZdMvU
+
+# 只查重并打印目标，不下载、不写数据库
+python -m src.job dQw4w9WgXcQ --dry-run
+
+# 限制清晰度（默认 1080，best 表示不限）
+python -m src.job dQw4w9WgXcQ --quality 720
+```
+
+### 交互式：下载当前标签页
+
+```bash
+# 默认：在 Chrome 里选好视频，回终端按回车
 python -m src.main
 
 # 自动模式：切到视频页停留 3 秒自动下载（同一 URL 只下一次）
 python -m src.main --auto
-python -m src.main --auto --auto-delay 8      # 更保守的停留时间
+python -m src.main --auto --auto-delay 8
 
 # 直接下载指定 URL 后退出
 python -m src.main --download "https://www.youtube.com/watch?v=xxxx"
-
-# 限制清晰度（默认 1080，best 表示不限）
-python -m src.main --quality 720
-
-# 指定平台：只把该站点的页面当视频页
-python -m src.main --platform youtube          # 只认 YouTube 视频页
-python -m src.main --platform tiktok --auto    # 只认 TikTok
 ```
 
-### 参数一览
+- **首次使用要先登录**：在 browserhost 那个 Chrome 里手动登录 YouTube，登录态留在
+  `~/.browserhost/profile` 里，之后长期复用。登录失效时 yt-dlp 会报
+  `Sign in to confirm you're not a bot`——去那只 Chrome 里重新登录后再试。
+- 连不上就先去起 browserhost（程序也会把这行提示打在日志里）：
+
+  ```bash
+  cd ../browserhost && python main.py start      # 幂等：已在跑且健康就直接复用
+  cd ../browserhost && python main.py restart    # 端口有响应但连不上时用它
+  ```
+
+- 退出本程序**不会**关掉那个 Chrome（它归 browserhost 管），也不会去关你或别的任务开的页签。
+
+### 查看记录 / 补登记历史文件
+
+```bash
+python -m src.cli list                    # 最近 20 条下载记录
+python -m src.cli list --limit 100
+python -m src.cli backfill                # 扫描 movies/，把历史文件补登记进库
+```
+
+## 参数一览
+
+### `python -m src.job`
+
+| 参数 | 说明 |
+|---|---|
+| `URL_OR_ID` | YouTube 链接或 11 位 video id；可给多个，按顺序处理 |
+| `--quality` | `1080`（默认）/ `720` / `480` / `360` / `best` |
+| `--port` | browserhost 那个常驻 Chrome 的调试端口，默认 `9222` |
+| `--dry-run` | 只查重并打印目标，不下载、不写数据库 |
+
+### `python -m src.main`
 
 | 参数 | 说明 |
 |---|---|
@@ -140,129 +191,29 @@ python -m src.main --platform tiktok --auto    # 只认 TikTok
 - `--platform` 的作用：只有该站点的页面才算视频页（自动模式不会对其他站点触发下载，
   终端提示里会写明「当前只下 X」）。想加平台只需在 `src/config.py` 的 `PLATFORMS` 里
   加一条（关键字 → 显示名 / 视频页正则），命令行会自动多出一个可选值。
-- **首次使用要先登录**：在 browserhost 那个 Chrome 里手动登录 YouTube / TikTok（发视频号
-  再扫码登录一次），登录态留在 `~/.browserhost/profile` 里，之后长期复用。
-- 连不上就先去起 browserhost（程序也会把这行提示打在日志里）：
 
-  ```bash
-  cd ../browserhost && python main.py start      # 幂等：已在跑且健康就直接复用
-  cd ../browserhost && python main.py restart    # 端口有响应但连不上时用它
-  ```
-
-- 退出本程序**不会**关掉那个 Chrome（它归 browserhost 管），也不会去关你或别的任务开的页签。
-
-### 下载产物
+## 下载产物
 
 ```text
 movies/
-└── 2026-09-16/                       # 按下载当天日期分目录
+└── 2026-10-18/                       # 按下载当天日期分目录
     └── 视频标题 [dQw4w9WgXcQ].mp4    # 标题取自视频，方括号里是视频 id（防重名）
 ```
 
 文件名走 `windowsfilenames` 规则，标题里的非法字符会被替换；标题截断到 100 字符。
-同一条视频重复下载时 yt-dlp 会识别出已存在的文件并跳过。
+同一条视频再次下载会在**查重阶段**被拦住，不会走到 yt-dlp。
 
-### 执行日志
+## 执行日志与退出码
 
 终端输出同时按天写入 `logs/mvposter_YYYY-MM-DD.log`（追加、逐行 flush）：每次运行记录
-代理来源、下载目录、当前标签页变化、每次下载的结果与落盘路径，便于事后核对
-「当时到底下了哪条视频」。退出码：`0` 正常退出 / 下载成功；`1` 连不上 CDP 服务或下载失败；
-`130` 被 Ctrl+C 中断。
+代理来源、下载目录、查重结果、下载结果与落盘路径。
 
-## 检索候选与去重（`python -m src.cli`）
-
-`src.main` 只管「我已经选好了，请下载」。**怎么找到值得下载的视频、怎么不重复爬、
-发到视频号**由 `src.cli` 负责（检索与记录不需要浏览器；发布要连 browserhost 的 CDP）：
-
-```bash
-# 0) 看「动物搞笑」按语义展开的关键词（不检索）
-python -m src.cli keywords --topic 动物搞笑 --focus 猫 --keyword-count 12
-
-# 1) 检索：默认用语义生成的关键词抓 YouTube 候选，按「播放速度」排序（播放量 ÷ 上线天数）
-python -m src.cli discover --top 10
-python -m src.cli discover --focus 狗 --keyword-count 8 --top 5
-python -m src.cli discover --keywords "funny cats shorts,funny dogs shorts"   # 也可手写词表
-python -m src.cli discover -o .cache/candidates.json     # 给脚本 / AI CLI 消费
-
-# 2) 挑中某条（人工或 AI 决定）
-python -m src.cli mark nRDysNZdMvU picked --note "挑中"
-
-# 3) 下载（借常驻 Chrome 的 cookies；终端里回一趟 src.main，或用 --download）
-python -m src.main --download "https://www.youtube.com/watch?v=nRDysNZdMvU"
-
-# 4) 下载完对账：把 movies/ 里的文件登记成 downloaded，下次检索就不会重复爬
-python -m src.cli backfill
-python -m src.cli list --status found
-
-# 5) 发布（默认填完表、核对无误就自动提交；想先人工核对就加 --no-publish）
-python -m src.cli publish nRDysNZdMvU --title "小狗撒娇求抱抱" --desc "每天一条动物搞笑" --tags 萌宠,搞笑动物
-python -m src.cli publish nRDysNZdMvU --no-publish               # 只填表 + 截图，停在「发表」前
-python -m src.cli mark nRDysNZdMvU published --post-id 123456    # 拿到视频号里的标识后补记
-```
-
-- **去重靠 YouTube 的 video_id**（不是标题）：记录写在 `data/mvposter.db`（SQLite，
-  `data/` 已在 `.gitignore` 里）。`discover` 默认跳过库里已有的 id，`backfill` 则把
-  `movies/` 里历史文件反向登记进库（文件名里的 `[id]` 就是键）。
-- **状态机**：`found → picked → downloaded → published`，旁支 `failed` / `skipped`；
-  `publish` 成功会自己写成 `published`，发布成功后再用 `mark --post-id` 补记视频号里的标识。
-- **发布默认自动提交**：填完表会**把字段读回来核对**（对不上就绝不提交），核对通过才点「发表」，
-  再以「页面跳到作品列表 / 出现『已发表』」确认结果；60s 内确认不了会如实报 `submitted` 让你去后台看。
-  想先人工核对一遍用 `--no-publish`（只填表 + 截图，停在按钮前，页签留着）。
-- **发布只动自己的页签**：`publish` 会**新开**一个页签打开视频号助手的发布页，绝不碰你或
-  别的任务开着的页签；登录态失效时只截图报错（`logs/publish_*.png`）、不尝试自动登录。
-  填的是「视频描述」（`--desc`，`--tags` 会以 `#标签` 附在末尾）与「短标题」（`--title`）；
-  `声明原创` 这类作者表态**不代做**，要勾自己勾。
-- **发布页是无界（wujie）微前端**：真实表单在 `<wujie-app>` 的 shadow DOM 里（`body.innerText`
-  看不到它），且打开后会自己重载一次——所以选择器只能用 Playwright 定位器，且必须等表单
-  挂载。选择器（实测于 2026-10-15）集中在 `src/publish.py` 顶部，改版后按截图重校。
-- **关键词是按语义生成的**：`src/keywords.py` 把主题（默认「动物搞笑」）拆成
-  动物 × 情境 × 风格 三个槽位再组合，种子默认取当天日期——同一天可复现、第二天换一批。
-  `--topic` 认别名（`animal` / `萌宠` / `pets` 都行），`--focus 猫` 聚焦某种动物
-  （中英文都认），`--with-chinese` 额外带中文词。词表在 `python -m src.cli keywords` 里看。
-- **排序参数是实测定的，不是照抄对照表**：默认 `--sort views`（按播放量降序）下，
-  100 条里有 69 条是 ≤60s 的短视频；而 YouTube 那个名字带 "short" 的筛选参数实测
-  **并不限制时长**（中位 1110s），所以时长/播放量过滤一律在本地做。
-- **播放速度而不是总播放量**：总播放量高的常年老视频搬到视频号没意义；
-  `score = 播放量 ÷ 上线天数`，取「正在涨」的。
-- 检索参数（排序 `sp`、时长/播放量阈值、每关键词条数）见 `src/discover.py` 顶部常量，
-  也都能用命令行覆盖。
-
-## 手动挑片 → 自动下载 + 发布（`python -m src.job`）
-
-程序化检索挑出来的素材质量不稳定、下载也时好时坏，所以**不再做无人值守**（macOS 的
-LaunchAgent 定时任务已移除）：**挑哪条由人决定**，把链接或 id 交给 `src.job`，后面的
-下载、填表、发布仍然全自动。
-
-```bash
-# 1) 找候选（可选）：按播放速度看一批，挑中后抄下 id / URL
-python -m src.cli discover --top 10
-
-# 2) 一条龙：下载 → 填表 → 核对 → 发布
-python -m src.job dQw4w9WgXcQ
-python -m src.job "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-python -m src.job dQw4w9WgXcQ nRDysNZdMvU        # 多条：中间按 --interval 抖动间隔
-python -m src.job dQw4w9WgXcQ --no-publish       # 只填表 + 截图，停在「发表」前
-python -m src.job dQw4w9WgXcQ --dry-run          # 只校验目标与登录态，不下载、不发布
-```
-
-- **挑片完全人工**：也可以直接在 Chrome 里逛 YouTube，复制地址栏链接；`discover`
-  只是可选的候选助手，不再参与自动决策。
-- **下载失败就重跑同一条命令**：yt-dlp 自己会重试 3 次；仍失败时换条素材或升级
-  `yt-dlp`（`uv lock --upgrade-package yt-dlp && uv sync`）。已下载过的会按 id 复用文件。
-- **已发布的不再重复发**：库里状态为 `published` 的目标会直接跳过；确实要重发加 `--force`。
-- **标题 / 频道自动补齐**：人工粘贴的链接即使不在库里也没关系，下载时 yt-dlp 返回的
-  标题、频道、时长会写回库，用于生成短标题、标签与「来源」一行。
-- **默认「填完即提交」**：想留一道人工闸门就用 `--no-publish`，看完截图
-  （`logs/publish_form_*.png`）自己在浏览器里点「发表」，再回写状态：
-  `python -m src.cli mark <id> published`。
-- **定时任务已清除**：仓库内的 `deploy/macos/` 已删除，本机装过的 LaunchAgent 也已卸载。
-  如果你曾用 `pmset` 加过 02:55 的定时唤醒，可用 `pmset -g sched` 查看、按需自行取消。
-- **前置条件**（`--dry-run` 会替你先查）：常驻 Chrome 里的视频号助手保持登录；那只 Chrome
-  自己必须能打开 `youtube.com` 并且真的登录过 YouTube。yt-dlp 靠 `LOGIN_INFO` 这个 cookie
-  判断登录态，只有 Google 的 SSO cookie（`SID` / `HSID` …）而没有它时，YouTube 会回
-  `Sign in to confirm you're not a bot`，下载必然失败。补救：让那只 Chrome 能正常访问
-  youtube.com 后，在登录状态下访问一次 youtube.com 让 `LOGIN_INFO` 落地——浏览器的代理
-  由 browserhost 决定，本项目不碰。
+| 退出码 | 含义 |
+|---|---|
+| `0` | 下载并记录成功（`--dry-run` 查重通过也算成功） |
+| `1` | 参数错误、连不上 CDP、导出 cookies / 下载失败 |
+| `2` | **命中重复记录**，按约定立即终止任务 |
+| `130` | 被 Ctrl+C 中断 |
 
 ## 目录结构
 
@@ -273,33 +224,25 @@ mvposter/
 ├── config.json         # 运行配置（代理地址等，可直接改）
 ├── README.md
 ├── src/
-│   ├── config.py       # 目录、视频站点规则、CDP 端口、代理与配置文件路径
+│   ├── config.py       # 目录、视频站点规则、CDP 端口、代理与去重键
 │   ├── logging.py      # 按天写日志（终端 + logs/mvposter_<日期>.log）
 │   ├── browser.py      # 只连接 browserhost 的 CDP：当前标签页、导出 cookies
 │   ├── downloader.py   # yt-dlp 封装：代理、movies/<日期>、格式与进度
-│   ├── discover.py     # 检索候选：flat 检索 + sp 排序 + 本地重排/过滤/打分
-│   ├── keywords.py     # 按语义槽位把主题展开成关键词
-│   ├── store.py        # SQLite：去重、状态机、与 movies/ 对账
-│   ├── publish.py      # 视频号发布（CDP 新开自己的页签，默认填完即自动提交）
-│   ├── cli.py          # 流水线入口：keywords / discover / list / backfill / mark / publish
-│   ├── job.py          # 手动挑片后的一条龙：下载 → 填表 → 发布
-│   └── main.py         # 下载入口：监听当前标签页 / --auto / --download
+│   ├── store.py        # SQLite：查重、下载记录、与 movies/ 对账
+│   ├── main.py         # 下载入口：监听当前标签页 / --auto / --download
+│   ├── job.py          # 一次性下载任务：查重 → 下载 → 记录 → 结束
+│   └── cli.py          # 记录查看：list / backfill
 ├── movies/             # 下载产物（运行时生成，按日期分目录）
-└── logs/               # 按天分的执行日志与发布截图（运行时生成）
+└── logs/               # 按天分的执行日志（运行时生成）
 ```
 
 ## 注意事项
 
 - **浏览器不归本项目管**：启动/关闭/登录态都交给 browserhost（`~/.browserhost/`），
   本仓库里遗留的 `chrome_profile/` 不再使用，可以自行删掉。
-- 请遵守各平台的使用条款，仅用于个人学习与合法用途。
-- 下载的视频版权归原作者所有。
-- 发布**默认自动提交**（`--no-publish` 可停在「发表」前）；视频号有审核与风控，
-  前几条建议用 `--no-publish` 人工过一眼，再放开自动提交。
-- 发布页的选择器是 **2026-10-15 实测校准**的（上传 `input[accept*=video]`、描述
-  `div.input-editor`、短标题 `input[placeholder*=短标题]`、发表按钮精确文案「发表」），
-  页面改版后按 `logs/publish_*.png` 重校。
+- **本仓库不发布**：描述、标题、话题都由你自己在视频号后台处理，避免自动化产出低质量文案。
+- 请遵守各平台的使用条款，仅用于个人学习与合法用途；下载的视频版权归原作者所有。
 - 视频站点的页面结构或风控变化可能导致下载失败，此时先升级 `yt-dlp`
   （`uv lock --upgrade-package yt-dlp && uv sync`）再试。
 - ffmpeg 的安装与升级都归系统/你自己管（`winget upgrade Gyan.FFmpeg` / `brew upgrade ffmpeg`）：
-  本程序不安装、不代管、也不检查，项目内也不放副本（旧版遗留的 `resources/bin/` 已删除）。
+  本程序不安装、不代管、也不检查，项目内也不放副本。
