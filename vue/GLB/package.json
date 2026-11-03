@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "name": "zysbf-glb-viewer",
+  "version": "1.0.0",
+  "description": "ZYSBF 智能设备房 GLB 三维查看器 (three.js)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "private": true
+}

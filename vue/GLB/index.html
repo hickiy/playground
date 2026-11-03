@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+<title>ZYSBF 智能设备房 · GLB 三维查看器</title>
+<style>
+  :root{
+    --bg:#0b1020;
+    --panel:rgba(14,20,38,.82);
+    --panel-solid:#0e1426;
+    --line:rgba(120,160,255,.16);
+    --text:#e8eeff;
+    --muted:#8fa0c8;
+    --accent:#4da3ff;
+    --accent-2:#35d6a4;
+    --warn:#ffb648;
+    --shadow:0 10px 34px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;}
+  #scene{position:fixed;inset:0;display:block;width:100%;height:100%}
+
+  /* ---------- top bar ---------- */
+  #topbar{
+    position:fixed;top:0;left:0;right:0;height:56px;z-index:20;
+    display:flex;align-items:center;gap:14px;padding:0 18px;
+    background:linear-gradient(180deg,rgba(9,13,26,.92),rgba(9,13,26,.55) 70%,transparent);
+    pointer-events:none;
+  }
+  #topbar .logo{
+    width:30px;height:30px;border-radius:8px;flex:none;
+    background:linear-gradient(140deg,var(--accent),#7b5cff);
+    display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff;
+    box-shadow:0 0 18px rgba(77,163,255,.45);
+  }
+  #topbar h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.3px}
+  #topbar .sub{font-size:12px;color:var(--muted);margin-left:2px}
+  #topbar .spacer{flex:1}
+  #topbar .stats{display:flex;gap:8px;flex-wrap:wrap;pointer-events:auto}
+  .chip{
+    font-size:11.5px;color:var(--muted);border:1px solid var(--line);
+    background:rgba(20,28,52,.6);border-radius:999px;padding:4px 10px;white-space:nowrap;
+  }
+  .chip b{color:var(--text);font-weight:600}
+  .chip.ok{border-color:rgba(53,214,164,.35);color:#9df0d3}
+  .chip.ok b{color:#35d6a4}
+
+  /* ---------- control panel ---------- */
+  #panel{
+    position:fixed;top:70px;right:16px;width:262px;z-index:25;
+    max-height:calc(100vh - 86px);overflow-y:auto;overscroll-behavior:contain;
+    background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+    padding:14px 14px 12px;font-size:12.5px;
+  }
+  #panel::-webkit-scrollbar{width:6px}
+  #panel::-webkit-scrollbar-thumb{background:rgba(120,160,255,.28);border-radius:3px}
+  #panel::-webkit-scrollbar-track{background:transparent}
+  #panel h2{margin:0 0 10px;font-size:12px;letter-spacing:1.4px;color:var(--muted);font-weight:600}
+  #panel h2 + .hr{height:1px;background:var(--line);margin:0 0 12px}
+  .btn{
+    display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    padding:9px 10px;margin-bottom:8px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(30,42,76,.6);color:var(--text);
+    font-size:12.5px;font-family:inherit;transition:.16s;
+  }
+  .btn:hover{background:rgba(48,66,116,.8);border-color:rgba(120,180,255,.42);transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.primary{
+    background:linear-gradient(135deg,rgba(77,163,255,.95),rgba(97,110,255,.95));
+    border-color:rgba(140,200,255,.55);font-weight:600;
+    box-shadow:0 6px 18px rgba(77,163,255,.28);
+  }
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn .k{
+    font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:5px;
+    padding:1px 5px;margin-left:auto;
+  }
+  .btn.on{background:rgba(53,214,164,.16);border-color:rgba(53,214,164,.5);color:#a9f2da}
+  .row{display:flex;align-items:center;justify-content:space-between;margin:11px 0 4px}
+  .row label{color:var(--muted)}
+  .row .val{font-variant-numeric:tabular-nums;color:var(--text);font-size:11.5px}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:4px;
+    background:linear-gradient(90deg,var(--accent) var(--p,50%),rgba(120,150,220,.22) var(--p,50%));
+    outline:none;margin:4px 0 2px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;
+    border:3px solid var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)
+  }
+  input[type=range]::-moz-range-thumb{
+    width:12px;height:12px;border-radius:50%;background:#fff;border:3px solid var(--accent);cursor:pointer
+  }
+  .divider{height:1px;background:var(--line);margin:12px 0 10px}
+  .row .ttl{color:var(--text);font-size:12px;font-weight:600;letter-spacing:.4px}
+  .mini{
+    margin-left:auto;background:rgba(77,163,255,.16);border:1px solid rgba(77,163,255,.4);
+    color:#bfe0ff;border-radius:6px;font-size:11px;padding:2px 9px;cursor:pointer;font-family:inherit;
+  }
+  .mini + .mini{margin-left:6px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg button{
+    background:transparent;border:0;color:var(--muted);font-size:11px;font-family:inherit;
+    padding:3px 8px;cursor:pointer;transition:.15s;
+  }
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button.on{background:rgba(77,163,255,.22);color:#cfe6ff}
+  .seg button:hover{color:#dbe8ff}
+  .mini:hover{background:rgba(77,163,255,.3);color:#fff}
+  .grid{display:grid;grid-template-columns:62px 1fr 22px;gap:5px 7px;align-items:center;margin:4px 0 8px}
+  .grid label{color:var(--muted);font-size:11px;white-space:nowrap}
+  .grid input{
+    width:100%;min-width:0;background:rgba(10,16,32,.75);border:1px solid var(--line);border-radius:6px;
+    color:var(--text);font-size:12px;font-family:inherit;padding:3px 6px;text-align:right;
+    font-variant-numeric:tabular-nums;appearance:textfield;-moz-appearance:textfield;
+  }
+  .grid input::-webkit-outer-spin-button,.grid input::-webkit-inner-spin-button{appearance:none;margin:0}
+  .grid input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(77,163,255,.16)}
+  .grid span{color:var(--muted);font-size:11px}
+  .json{
+    width:100%;height:52px;resize:none;background:rgba(8,13,26,.75);border:1px solid var(--line);
+    border-radius:7px;color:#9fd0a8;font-size:10px;line-height:1.5;font-family:Consolas,monospace;
+    padding:6px 7px;margin:2px 0 4px;white-space:pre-wrap;word-break:break-all;
+  }
+  .note{color:var(--muted);font-size:11px;line-height:1.65}
+  .note b{color:#bcd0f5;font-weight:600}
+
+  /* ---------- hud (bottom-left) ---------- */
+  #hud{
+    position:fixed;left:16px;bottom:16px;z-index:22;
+    background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+    box-shadow:var(--shadow);font-size:11.5px;color:var(--muted);line-height:1.7;
+    max-width:330px;
+  }
+  #hud .t{color:var(--text);font-weight:600;font-size:12px;margin-bottom:5px;letter-spacing:.4px}
+  #hud .g{display:flex;justify-content:space-between;gap:14px}
+  #hud .g span:last-child{color:#cfe0ff;font-variant-numeric:tabular-nums}
+
+  /* ---------- device labels ---------- */
+  #labels{position:fixed;inset:0;z-index:15;pointer-events:none;overflow:hidden}
+  .lbl{
+    position:absolute;transform:translate(-50%,-50%);
+    font-size:10.5px;letter-spacing:.2px;color:#dfe9ff;white-space:nowrap;
+    background:rgba(12,18,36,.72);border:1px solid rgba(120,170,255,.35);
+    border-radius:5px;padding:1px 6px;backdrop-filter:blur(4px);
+    box-shadow:0 3px 10px rgba(0,0,0,.45);
+  }
+  .lbl.hot{background:rgba(77,163,255,.9);border-color:#9fd0ff;color:#04101f;font-weight:700}
+
+  /* ---------- loader ---------- */
+  #loader{
+    position:fixed;inset:0;z-index:60;display:grid;place-items:center;
+    background:radial-gradient(1200px 700px at 50% 40%,#16203c,#080c18 70%);
+    transition:opacity .5s ease;
+  }
+  #loader .box{width:320px;text-align:center}
+  #loader .ring{
+    width:52px;height:52px;margin:0 auto 18px;border-radius:50%;
+    border:3px solid rgba(120,170,255,.18);border-top-color:var(--accent);
+    animation:spin .9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #loader .msg{font-size:13px;color:var(--text);letter-spacing:.5px}
+  #loader .bar{height:3px;border-radius:3px;background:rgba(120,170,255,.16);margin-top:12px;overflow:hidden}
+  #loader .bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#7b5cff);transition:width .2s}
+  #loader .err{color:#ff8f8f;font-size:12px;line-height:1.7;margin-top:14px;text-align:left;
+    background:rgba(255,80,80,.08);border:1px solid rgba(255,120,120,.3);border-radius:10px;padding:12px 14px;display:none}
+
+  @media (max-width:820px){
+    #panel{width:210px;right:10px;top:64px;padding:11px}
+    #hud{display:none}
+    #topbar .stats{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="labels"></div>
+
+<header id="topbar">
+  <div class="logo">3D</div>
+  <div>
+    <h1>ZYSBF 智能设备房 · GLB 渲染查看器</h1>
+    <div class="sub">建筑半剖切 · 人眼高度 45° 固定机位</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="stats">
+    <div class="chip">设备 <b id="sEquip">–</b></div>
+    <div class="chip">面数 <b id="sTri">–</b></div>
+    <div class="chip">模型尺寸 <b id="sSize">–</b></div>
+    <div class="chip ok" id="sVisChip">可视 <b id="sVis">–</b></div>
+  </div>
+</header>
+
+<aside id="panel">
+  <h2>视图控制</h2>
+  <div class="hr"></div>
+  <button class="btn primary" id="btnReset">一键回归<span class="k">R</span></button>
+  <button class="btn" id="btnPin">固定此机位<span class="k">F</span></button>
+  <button class="btn" id="btnOverview">设备总览<span class="k">O</span></button>
+  <button class="btn" id="btnCut">建筑半剖切<span class="k">C</span></button>
+  <button class="btn" id="btnLabels">设备标注<span class="k">L</span></button>
+  <button class="btn" id="btnShadows">阴影 / 网格<span class="k">G</span></button>
+
+  <div class="divider"></div>
+  <div class="row"><span class="ttl">机位数据</span>
+    <button class="mini" id="btnRefit">重新取景</button>
+    <button class="mini" id="btnCopy">复制</button>
+  </div>
+  <div class="row" style="margin-top:8px"><label>左键拖拽</label>
+    <div class="seg" id="segDrag">
+      <button data-mode="pan" class="on">平移模型</button>
+      <button data-mode="rotate">旋转视角</button>
+    </div>
+  </div>
+  <div class="grid">
+    <label>眼高</label><input type="number" id="nEye" step="0.05" /><span>m</span>
+    <label>方位角</label><input type="number" id="nAz" step="1" /><span>°</span>
+    <label>光轴俯角</label><input type="number" id="nPitch" step="1" /><span>°</span>
+    <label>水平距离</label><input type="number" id="nDist" step="0.1" /><span>m</span>
+    <label>目标 X</label><input type="number" id="nTx" step="any" /><span>m</span>
+    <label>目标 Z</label><input type="number" id="nTz" step="any" /><span>m</span>
+    <label>画幅 FOV</label><input type="number" id="nFov" step="1" /><span>°</span>
+  </div>
+  <textarea id="viewJson" class="json" readonly spellcheck="false"></textarea>
+
+  <div class="divider"></div>
+  <div class="row"><label>剖切程度</label><span class="val" id="vCut">50%</span></div>
+  <input type="range" id="rCut" min="0" max="100" value="50" />
+
+  <div class="divider"></div>
+  <div class="note">
+    <b>固定机位</b>：眼高 <b id="nEyeTxt">1.60 m</b>、光轴俯角 <b id="nPitchTxt">45°</b>，正对剖切开口。<br/>
+    <b>剖切面始终垂直于镜头方向</b>：镜头转到哪，建筑就朝哪剖开。<br/>
+    <b>左键拖拽</b>＝平移模型（可在上方切换为旋转视角）；<br/>
+    <b>右键拖拽 / Ctrl+左键</b>＝旋转，剖切面同步跟随。<br/>
+    <b>滚轮</b>＝镜头变焦（22°～默认画幅，<b>只能放大</b>）；<br/>
+    <b>Ctrl+滚轮</b>＝机位推进（1～14 m），可走到设备跟前细看。<br/>
+    调好后按 <b>F</b> 固定，<b>一键回归</b> 即可回到该机位。
+  </div>
+</aside>
+
+<div id="hud">
+  <div class="t">机位实时数据</div>
+  <div class="g"><span>眼高 / 俯角</span><span id="hEyePitch">–</span></div>
+  <div class="g"><span>方位角</span><span id="hAz">–</span></div>
+  <div class="g"><span>水平距离 / 斜距</span><span id="hDist">–</span></div>
+  <div class="g"><span>相机 XYZ</span><span id="hCam">–</span></div>
+  <div class="g"><span>目标 XYZ</span><span id="hTgt">–</span></div>
+  <div class="g"><span>画幅 / 轴角</span><span id="hShift">–</span></div>
+  <div class="g"><span>剖切面</span><span id="hPlane">–</span></div>
+</div>
+
+<div id="loader">
+  <div class="box">
+    <div class="ring"></div>
+    <div class="msg" id="ldMsg">正在加载模型 zysbf.glb …</div>
+    <div class="bar"><i id="ldBar"></i></div>
+    <div class="err" id="ldErr"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/jsm/"
+  }
+}
+</script>
+<script type="module" src="./app/viewer.js"></script>
+</body>
+</html>

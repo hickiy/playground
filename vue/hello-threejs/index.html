@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="通过可交互的 Three.js 场景学习 3D 坐标、相机、材质和拾取。"
+    />
+    <title>Three.js 3D 渲染练习场</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Three.js 练习场首页">
+          <span class="brand-mark">3D</span>
+          <span>Three.js <span class="brand-muted">学习练习场</span></span>
+        </a>
+        <div class="topbar-note"><span class="live-dot"></span>可交互场景 · r184</div>
+      </header>
+
+      <main class="workspace">
+        <section class="stage-column" aria-label="3D 场景练习">
+          <div class="stage-heading">
+            <div>
+              <p class="eyebrow">从图形到画面</p>
+              <h1>看见 3D 渲染的每一步</h1>
+              <p class="subtitle">拖动旋转视角，滚轮缩放，点击物体查看它的世界坐标。</p>
+            </div>
+            <div class="scene-badge"><span class="badge-dot"></span>SCENE 01</div>
+          </div>
+
+          <div class="stage-frame">
+            <div id="scene-container" class="scene-container" aria-label="可交互的 Three.js 3D 场景"></div>
+            <div class="stage-label"><span class="label-crosshair">+</span> WORLD SPACE</div>
+            <div class="stage-tip">左键拖动旋转 <span>·</span> 滚轮缩放 <span>·</span> 点击物体选中</div>
+            <div id="selection-toast" class="selection-toast" aria-live="polite">点击任意几何体开始探索</div>
+          </div>
+
+          <div class="concept-strip">
+            <article class="concept-card">
+              <span class="concept-number">01</span>
+              <div><h2>模型变换</h2><p>位置、旋转、缩放，把局部坐标放进世界。</p></div>
+            </article>
+            <article class="concept-card">
+              <span class="concept-number">02</span>
+              <div><h2>相机投影</h2><p>透视让远处变小；正交投影不改变物体大小。</p></div>
+            </article>
+            <article class="concept-card">
+              <span class="concept-number">03</span>
+              <div><h2>光照与材质</h2><p>灯光照亮表面，材质决定如何响应光线。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="control-panel" aria-label="练习控制面板">
+          <section class="panel-section">
+            <div class="section-title"><span class="section-icon icon-scene">✳</span><h2>场景控制</h2></div>
+            <div class="control-list">
+              <button id="camera-toggle" class="control-row" type="button">
+                <span><span class="control-glyph">◉</span>相机投影</span><span id="camera-value" class="control-value">透视</span>
+              </button>
+              <button id="axes-toggle" class="control-row" type="button" aria-pressed="true">
+                <span><span class="control-glyph">⌖</span>坐标轴</span><span class="switch is-on"></span>
+              </button>
+              <button id="grid-toggle" class="control-row" type="button" aria-pressed="true">
+                <span><span class="control-glyph">▦</span>地面网格</span><span class="switch is-on"></span>
+              </button>
+              <button id="wireframe-toggle" class="control-row" type="button" aria-pressed="false">
+                <span><span class="control-glyph">◇</span>线框模式</span><span class="switch"></span>
+              </button>
+              <button id="rotate-toggle" class="control-row" type="button" aria-pressed="false">
+                <span><span class="control-glyph">↻</span>自动旋转</span><span class="switch"></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="panel-section object-section">
+            <div class="section-title"><span class="section-icon icon-object">⬡</span><h2>场景物体</h2><span class="section-count">03</span></div>
+            <div id="object-list" class="object-list"></div>
+          </section>
+
+          <section class="panel-section transform-section">
+            <div class="section-title"><span class="section-icon icon-transform">↗</span><h2>世界坐标</h2></div>
+            <p id="transform-hint" class="transform-hint">选择一个物体，查看并调整它的位置。</p>
+            <div class="axis-inputs">
+              <label class="axis-control axis-x"><span>X</span><input id="position-x" type="range" min="-4" max="4" step="0.1" value="0" disabled /><output id="value-x">0.0</output></label>
+              <label class="axis-control axis-y"><span>Y</span><input id="position-y" type="range" min="0" max="4" step="0.1" value="0.7" disabled /><output id="value-y">0.7</output></label>
+              <label class="axis-control axis-z"><span>Z</span><input id="position-z" type="range" min="-3" max="3" step="0.1" value="0" disabled /><output id="value-z">0.0</output></label>
+            </div>
+            <div class="matrix-note"><span class="matrix-icon">M</span><span>物体位置属于 <strong>世界坐标</strong><br />拖动滑块，观察模型矩阵的效果。</span></div>
+          </section>
+
+          <div class="panel-footer">
+            <button id="reset-button" class="reset-button" type="button"><span>↺</span> 重置场景</button>
+            <p>练习提示：一次只改变一个变量，观察画面如何响应。</p>
+          </div>
+        </aside>
+      </main>
+      <footer class="app-footer"><span>THREE.JS FUNDAMENTALS</span><span>一个场景 = 几何体 + 材质 + 光照 + 相机</span></footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
